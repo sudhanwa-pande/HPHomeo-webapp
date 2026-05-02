@@ -32,14 +32,19 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://checkout.razorpay.com`,
+              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://*.razorpay.com`,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://res.cloudinary.com",
               "font-src 'self'",
-              "connect-src 'self' https://lumberjack.razorpay.com https://checkout.razorpay.com wss://*.livekit.cloud" +
-                (process.env.NEXT_PUBLIC_API_URL ? ` ${process.env.NEXT_PUBLIC_API_URL}` : ""),
+              "connect-src 'self' https://*.razorpay.com wss://*.livekit.cloud" +
+                // Only append NEXT_PUBLIC_API_URL when it's an absolute URL.
+                // Relative paths like "/api/v1" aren't valid CSP sources and
+                // get ignored by the browser (with a console warning).
+                (process.env.NEXT_PUBLIC_API_URL?.startsWith("http")
+                  ? ` ${process.env.NEXT_PUBLIC_API_URL}`
+                  : ""),
               "media-src 'self' blob:",
-              "frame-src 'self' blob: https://api.razorpay.com https://checkout.razorpay.com",
+              "frame-src 'self' blob: https://*.razorpay.com",
               "object-src 'self'",
               "base-uri 'self'",
               "form-action 'self'",

@@ -25,7 +25,10 @@ import {
   Briefcase,
 } from "lucide-react";
 
+import axios from "axios";
+
 import api, { getApiError } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { Navbar } from "@/components/layout/navbar";
 import { Skeleton } from "@/components/loading";
 import { Button } from "@/components/ui/button";
@@ -142,11 +145,22 @@ export default function BookDoctorPage() {
   // Step management
   const [step, setStep] = useState<Step>(preselectedSlot ? "details" : "slot");
 
-  // Slot selection
-  const [selectedDate, setSelectedDate] = useState<Date>(
-    preselectedSlot ? new Date(preselectedSlot) : new Date()
+  // Slot selection.
+  // Hydration-safe: Next.js renders this once on the server (UTC) and once on
+  // the client (browser locale). `new Date()` differs between the two — even
+  // by milliseconds it triggers React's hydration mismatch warning. We start
+  // as null and set "today" in useEffect below so the SSR and initial client
+  // renders match. preselectedSlot is safe because it comes from the URL.
+  const [selectedDate, setSelectedDate] = useState<Date | null>(
+    preselectedSlot ? new Date(preselectedSlot) : null,
   );
   const [selectedSlot, setSelectedSlot] = useState<string | null>(preselectedSlot);
+
+  useEffect(() => {
+    if (!selectedDate) {
+      setSelectedDate(new Date());
+    }
+  }, [selectedDate]);
 
   // Patient details
   const [patientName, setPatientName] = useState("");
@@ -187,7 +201,8 @@ export default function BookDoctorPage() {
     }
   }, [doctor]);
 
-  const dateOptions = useMemo(() => {
+  const dateOptions = useMemo<Date[]>(() => {
+    if (!selectedDate) return [];
     const dates: Date[] = [];
     const today = new Date();
     for (let i = 0; i < 7; i++) {
@@ -196,10 +211,10 @@ export default function BookDoctorPage() {
       dates.push(d);
     }
     return dates;
-  }, []);
+  }, [selectedDate]);
 
   const monthLabel = getMonthRangeLabel(dateOptions);
-  const dateString = toDateString(selectedDate);
+  const dateString = selectedDate ? toDateString(selectedDate) : "";
 
   const { data: slotsData, isLoading: slotsLoading } = useQuery({
     queryKey: ["public", "doctor", doctorId, "slots", dateString],
@@ -210,7 +225,7 @@ export default function BookDoctorPage() {
       );
       return data;
     },
-    enabled: !!doctorId,
+    enabled: !!doctorId && !!selectedDate,
   });
 
   const slots = slotsData?.slots || [];
@@ -304,6 +319,58 @@ export default function BookDoctorPage() {
     },
   });
 
+  /* ─── Retry payment for an already-booked appointment ─── */
+  // Used when the patient dismissed the Razorpay modal but the slot is still
+  // reserved. Re-creates a Razorpay order against the existing appointment
+  // (backend handles idempotency: returns the same order if one already exists,
+  // and 409s if the 10-min hold has expired — see payment_order_service.py).
+
+  const retryPaymentMutation = useMutation({
+    mutationFn: async () => {
+      if (!bookingSuccess) throw new Error("No appointment to retry");
+
+      const { data: orderData } = await api.post<{
+        message: string;
+        order_id: string;
+        amount_paise: number;
+        currency: string;
+        key_id: string;
+      }>("/public/payments/create-order", {
+        appointment_id: bookingSuccess.appointment_id,
+      });
+
+      if (orderData.message === "already_paid" || !orderData.order_id) {
+        setPaymentCompleted(true);
+        return;
+      }
+
+      const { openRazorpayCheckout } = await import("@/lib/razorpay");
+      await openRazorpayCheckout({
+        keyId: orderData.key_id,
+        orderId: orderData.order_id,
+        amount: orderData.amount_paise,
+        currency: orderData.currency,
+        patientName: patientName.trim(),
+        patientEmail: patientEmail.trim() || undefined,
+        patientPhone: patientPhone.trim(),
+        description: `Consultation with ${doctor?.full_name || "Doctor"}`,
+        onSuccess: () => setPaymentCompleted(true),
+      });
+    },
+    onError: (error) => {
+      // axios.ts interceptor already toasts network/429/5xx errors; show our
+      // own message for 4xx (e.g. 409 "Payment window expired").
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        if (status && status >= 400 && status < 500 && status !== 429) {
+          toast.error("Could not start payment", {
+            description: getApiError(error),
+          });
+        }
+      }
+    },
+  });
+
   /* ─── Navigation helpers ─── */
 
   const goToStep = useCallback((target: Step) => {
@@ -377,14 +444,22 @@ export default function BookDoctorPage() {
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{ delay: 0.15, type: "spring", stiffness: 200, damping: 12 }}
-                className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 ring-8 ring-emerald-50/50"
+                className={`mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full ring-8 ${
+                  isPaymentPending
+                    ? "bg-amber-50 ring-amber-50/50"
+                    : "bg-emerald-50 ring-emerald-50/50"
+                }`}
               >
                 <motion.div
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   transition={{ delay: 0.3, type: "spring", stiffness: 300 }}
                 >
-                  <CheckCircle2 className="h-10 w-10 text-emerald-600" />
+                  {isPaymentPending ? (
+                    <Clock className="h-10 w-10 text-amber-600" />
+                  ) : (
+                    <CheckCircle2 className="h-10 w-10 text-emerald-600" />
+                  )}
                 </motion.div>
               </motion.div>
 
@@ -394,14 +469,18 @@ export default function BookDoctorPage() {
                 transition={{ delay: 0.3 }}
               >
                 <h2 className="text-xl font-bold tracking-tight text-gray-900">
-                  {isPaid ? "Appointment Confirmed!" : "Appointment Booked!"}
+                  {isPaid
+                    ? "Appointment Confirmed!"
+                    : isPayLater
+                      ? "Appointment Booked!"
+                      : "Slot Reserved"}
                 </h2>
                 <p className="mt-1.5 text-sm text-gray-500">
                   {isPaid
                     ? "Payment received — you\u2019re all set!"
                     : isPayLater
                       ? "Your appointment is confirmed. Pay at the clinic."
-                      : `Your appointment with ${doctor.full_name} has been reserved.`}
+                      : "Complete payment to confirm your appointment."}
                 </p>
               </motion.div>
 
@@ -482,18 +561,20 @@ export default function BookDoctorPage() {
               </div>
             </motion.div>
 
-            {/* Notification info */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.55 }}
-              className="mt-3 rounded-2xl border border-gray-200/60 bg-white px-5 py-4"
-            >
-              <p className="text-center text-xs text-gray-500">
-                Confirmation details have been sent via WhatsApp.
-                {patientEmail.trim() && " A confirmation email is on its way too."}
-              </p>
-            </motion.div>
+            {/* Notification info — only when actually confirmed */}
+            {!isPaymentPending && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.55 }}
+                className="mt-3 rounded-2xl border border-gray-200/60 bg-white px-5 py-4"
+              >
+                <p className="text-center text-xs text-gray-500">
+                  Confirmation details have been sent via WhatsApp.
+                  {patientEmail.trim() && " A confirmation email is on its way too."}
+                </p>
+              </motion.div>
+            )}
 
             {/* Payment pending notice — only for dismissed Razorpay */}
             {isPaymentPending && (
@@ -501,12 +582,28 @@ export default function BookDoctorPage() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.55 }}
-                className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center"
+                className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4"
               >
-                <p className="text-sm font-medium text-amber-800">Payment not completed</p>
-                <p className="mt-1 text-xs text-amber-600">
+                <p className="text-center text-sm font-medium text-amber-800">
+                  Payment not completed
+                </p>
+                <p className="mt-1 text-center text-xs text-amber-600">
                   Your slot is reserved. Complete payment to confirm your appointment.
                 </p>
+                <Button
+                  onClick={() => retryPaymentMutation.mutate()}
+                  disabled={retryPaymentMutation.isPending}
+                  className="mt-3 w-full rounded-xl bg-amber-600 hover:bg-amber-700"
+                >
+                  {retryPaymentMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Opening payment…
+                    </>
+                  ) : (
+                    <>Pay {fee === 0 ? "Now" : `₹${fee} Now`}</>
+                  )}
+                </Button>
               </motion.div>
             )}
 
@@ -719,7 +816,7 @@ export default function BookDoctorPage() {
                   {/* 7-day picker */}
                   <div className="flex gap-0 mb-5">
                     {dateOptions.map((date, idx) => {
-                      const isSelected = date.toDateString() === selectedDate.toDateString();
+                      const isSelected = selectedDate ? date.toDateString() === selectedDate.toDateString() : false;
                       const dayLabel = idx === 0
                         ? "Today"
                         : date.toLocaleDateString("en-US", { weekday: "short" });

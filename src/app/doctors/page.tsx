@@ -247,8 +247,16 @@ export default function FindDoctorPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState<PublicDoctor | null>(null);
   const [mobileProfileOpen, setMobileProfileOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  // Hydration-safe: start as null and set to "today" after mount. See booking
+  // page for the same pattern + reasoning.
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedDate) {
+      setSelectedDate(new Date());
+    }
+  }, [selectedDate]);
 
 
   // Debounce search
@@ -271,7 +279,7 @@ export default function FindDoctorPage() {
 
   const doctors = doctorsData?.doctors || [];
 
-  const dateString = toDateString(selectedDate);
+  const dateString = selectedDate ? toDateString(selectedDate) : "";
   const { data: slotsData, isLoading: slotsLoading } = useQuery({
     queryKey: ["public", "doctor", selectedDoctor?.doctor_id, "slots", dateString],
     queryFn: async () => {
@@ -281,12 +289,13 @@ export default function FindDoctorPage() {
       );
       return data;
     },
-    enabled: !!selectedDoctor,
+    enabled: !!selectedDoctor && !!selectedDate,
   });
 
   const slots = slotsData?.slots || [];
 
-  const dateOptions = useMemo(() => {
+  const dateOptions = useMemo<Date[]>(() => {
+    if (!selectedDate) return [];
     const dates: Date[] = [];
     const today = new Date();
     for (let i = 0; i < 7; i++) {
@@ -295,7 +304,7 @@ export default function FindDoctorPage() {
       dates.push(d);
     }
     return dates;
-  }, []);
+  }, [selectedDate]);
 
   const monthLabel = getMonthRangeLabel(dateOptions);
 
@@ -451,7 +460,7 @@ export default function FindDoctorPage() {
               {/* 7-day date picker with Today label */}
               <div className="flex gap-0 mb-5">
                 {dateOptions.map((date, idx) => {
-                  const isSelected = date.toDateString() === selectedDate.toDateString();
+                  const isSelected = selectedDate ? date.toDateString() === selectedDate.toDateString() : false;
                   const dayLabel = idx === 0
                     ? "Today"
                     : date.toLocaleDateString("en-US", { weekday: "short" });
