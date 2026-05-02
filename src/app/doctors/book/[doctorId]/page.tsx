@@ -177,6 +177,23 @@ export default function BookDoctorPage() {
   const [bookingSuccess, setBookingSuccess] = useState<PublicBookingResponse | null>(null);
   const [paymentCompleted, setPaymentCompleted] = useState(false);
 
+  // Payment hold countdown — set when the payment order is first created.
+  // Backend's payment window is fixed from initial booking and does NOT
+  // reset on retry, so we only need to capture this once.
+  const [paymentExpiresAt, setPaymentExpiresAt] = useState<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState<number>(0);
+
+  useEffect(() => {
+    if (!paymentExpiresAt) return;
+    const tick = () => {
+      const diff = new Date(paymentExpiresAt).getTime() - Date.now();
+      setSecondsLeft(Math.max(0, Math.floor(diff / 1000)));
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [paymentExpiresAt]);
+
   /* ─── Queries ─── */
 
   const { data: doctor, isLoading: doctorLoading } = useQuery({
@@ -284,6 +301,7 @@ export default function BookDoctorPage() {
             amount_paise: number;
             currency: string;
             key_id: string;
+            expires_at: string | null;
           }>("/public/payments/create-order", {
             appointment_id: data.appointment_id,
           });
@@ -292,6 +310,12 @@ export default function BookDoctorPage() {
             setPaymentCompleted(true);
             setBookingSuccess(data);
             return;
+          }
+
+          // Capture the payment hold expiry so the success-screen countdown
+          // knows when to disable the "Pay Now" button.
+          if (orderData.expires_at) {
+            setPaymentExpiresAt(orderData.expires_at);
           }
 
           const { openRazorpayCheckout } = await import("@/lib/razorpay");
@@ -335,6 +359,7 @@ export default function BookDoctorPage() {
         amount_paise: number;
         currency: string;
         key_id: string;
+        expires_at: string | null;
       }>("/public/payments/create-order", {
         appointment_id: bookingSuccess.appointment_id,
       });
@@ -342,6 +367,13 @@ export default function BookDoctorPage() {
       if (orderData.message === "already_paid" || !orderData.order_id) {
         setPaymentCompleted(true);
         return;
+      }
+
+      // Backend returns the same expires_at on retries (window doesn't reset),
+      // but capture it in case this is the first time we see it (e.g. user
+      // navigated to a payment-pending appointment from a deep link).
+      if (orderData.expires_at) {
+        setPaymentExpiresAt(orderData.expires_at);
       }
 
       const { openRazorpayCheckout } = await import("@/lib/razorpay");
@@ -577,35 +609,84 @@ export default function BookDoctorPage() {
             )}
 
             {/* Payment pending notice — only for dismissed Razorpay */}
-            {isPaymentPending && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.55 }}
-                className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4"
-              >
-                <p className="text-center text-sm font-medium text-amber-800">
-                  Payment not completed
-                </p>
-                <p className="mt-1 text-center text-xs text-amber-600">
-                  Your slot is reserved. Complete payment to confirm your appointment.
-                </p>
-                <Button
-                  onClick={() => retryPaymentMutation.mutate()}
-                  disabled={retryPaymentMutation.isPending}
-                  className="mt-3 w-full rounded-xl bg-amber-600 hover:bg-amber-700"
+            {isPaymentPending && (() => {
+              const hasExpiry = paymentExpiresAt !== null;
+              const isExpired = hasExpiry && secondsLeft <= 0;
+              const isUrgent = hasExpiry && secondsLeft > 0 && secondsLeft <= 60;
+              const mm = Math.floor(secondsLeft / 60);
+              const ss = (secondsLeft % 60).toString().padStart(2, "0");
+
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.55 }}
+                  className={`mt-3 rounded-2xl border px-5 py-4 ${
+                    isExpired
+                      ? "border-red-200 bg-red-50"
+                      : "border-amber-200 bg-amber-50"
+                  }`}
                 >
-                  {retryPaymentMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Opening payment…
-                    </>
-                  ) : (
-                    <>Pay {fee === 0 ? "Now" : `₹${fee} Now`}</>
+                  <p
+                    className={`text-center text-sm font-semibold ${
+                      isExpired ? "text-red-800" : "text-amber-800"
+                    }`}
+                  >
+                    {isExpired ? "Booking expired" : "Payment not completed"}
+                  </p>
+                  <p
+                    className={`mt-1 text-center text-xs ${
+                      isExpired ? "text-red-600" : "text-amber-600"
+                    }`}
+                  >
+                    {isExpired
+                      ? "Your slot was released. Please book again."
+                      : "Your slot is reserved. Complete payment to confirm your appointment."}
+                  </p>
+
+                  {/* Countdown */}
+                  {hasExpiry && !isExpired && (
+                    <div
+                      className={`mt-3 flex items-center justify-center gap-2 rounded-lg py-1.5 text-sm font-mono font-semibold tabular-nums transition-colors ${
+                        isUrgent
+                          ? "bg-red-100/70 text-red-700"
+                          : "bg-amber-100/70 text-amber-800"
+                      }`}
+                    >
+                      <Clock
+                        className={`h-3.5 w-3.5 ${
+                          isUrgent ? "animate-pulse text-red-600" : "text-amber-600"
+                        }`}
+                      />
+                      <span>
+                        Pay within {mm}:{ss}
+                      </span>
+                    </div>
                   )}
-                </Button>
-              </motion.div>
-            )}
+
+                  <Button
+                    onClick={() => retryPaymentMutation.mutate()}
+                    disabled={retryPaymentMutation.isPending || isExpired}
+                    className={`mt-3 w-full rounded-xl ${
+                      isExpired
+                        ? "bg-gray-300 hover:bg-gray-300 cursor-not-allowed"
+                        : "bg-amber-600 hover:bg-amber-700"
+                    }`}
+                  >
+                    {retryPaymentMutation.isPending ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Opening payment…
+                      </>
+                    ) : isExpired ? (
+                      <>Booking expired</>
+                    ) : (
+                      <>Pay {fee === 0 ? "Now" : `₹${fee} Now`}</>
+                    )}
+                  </Button>
+                </motion.div>
+              );
+            })()}
 
             {/* Actions */}
             <motion.div
