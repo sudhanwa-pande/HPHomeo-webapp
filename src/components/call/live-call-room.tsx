@@ -137,9 +137,16 @@ export function LiveCallRoom({
   const tracks = useTracks(trackSources, trackQueryOptions);
   const videoDevices = useMediaDevices(mediaDevicesOptions);
 
-  // Remote participant connection quality
+  // Remote participant connection quality.
+  // useConnectionQualityIndicator throws "No participant provided" if the
+  // argument is undefined. When the patient joins first (typical case),
+  // remoteParticipants[0] is undefined, so we fall back to localParticipant
+  // (always valid inside <LiveKitRoom>). hasWeakRemoteSignal still requires
+  // an actual remote participant — the fallback is just to keep the hook
+  // happy until the doctor joins.
+  const qualityTarget = remoteParticipants[0] ?? localParticipant;
   const { quality: remoteQuality } = useConnectionQualityIndicator(
-    { participant: remoteParticipants[0] },
+    { participant: qualityTarget },
   );
   const hasWeakRemoteSignal =
     remoteParticipants.length > 0 &&
