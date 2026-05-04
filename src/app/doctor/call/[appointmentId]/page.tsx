@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LiveKitRoom } from "@livekit/components-react";
@@ -35,6 +35,14 @@ type MediaPreferences = {
   video: boolean;
 };
 
+// Imperative handle exposed by the pre-join card so the parent can release
+// the preview MediaStream's tracks BEFORE <LiveKitRoom> mounts. Avoids the
+// "device in use" race where LiveKit tries to acquire camera/mic before
+// React has run the card's unmount cleanup.
+type PreJoinHandle = {
+  releasePreview: () => void;
+};
+
 export default function CallRoomPage() {
   return (
     <AuthGuard role="doctor">
@@ -50,6 +58,9 @@ function CallRoomContent() {
   const queryClient = useQueryClient();
   const autoResumeAttemptedRef = useRef(false);
   const joinInFlightRef = useRef(false);
+  // Lets us imperatively release the pre-join preview's MediaStream tracks
+  // immediately before mounting <LiveKitRoom> — see PreJoinHandle docstring.
+  const preJoinRef = useRef<PreJoinHandle>(null);
   const resumeStorageKey = `ehomeo:doctor-call:${appointmentId}`;
   const resumeAttemptStorageKey = `${resumeStorageKey}:resume-lock`;
 
@@ -189,6 +200,11 @@ function CallRoomContent() {
         }
 
         const { data } = await api.post<VideoTokenResponse>(`/doctor/appointments/${appointmentId}/video-token`);
+        // Release the preview's camera/mic before <LiveKitRoom> mounts and
+        // tries to re-acquire them. 200 ms covers Chrome/Safari device-release
+        // latency so LiveKit's getUserMedia doesn't see a still-locked device.
+        preJoinRef.current?.releasePreview();
+        await new Promise((resolve) => setTimeout(resolve, 200));
         setTokenData(data);
         // callStartedAt is set via onConnected when the room actually connects,
         // not here — avoids counting ICE/DTLS negotiation time in the call timer.
@@ -387,6 +403,7 @@ function CallRoomContent() {
   if (!tokenData) {
     return (
       <PreJoinCard
+        ref={preJoinRef}
         title={appointment?.patient?.full_name ?? "Video consultation"}
         subtitle={
           appointment ? format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy - hh:mm a") : ""
@@ -445,19 +462,7 @@ function CallRoomContent() {
   );
 }
 
-function PreJoinCard({
-  title,
-  subtitle,
-  callStatus,
-  joinError,
-  joining,
-  mediaPreferences,
-  onToggleAudio,
-  onToggleVideo,
-  onJoin,
-  onJoinWithoutMedia,
-  onBack,
-}: {
+type PreJoinCardProps = {
   title: string;
   subtitle: string;
   callStatus?: string;
@@ -469,10 +474,38 @@ function PreJoinCard({
   onJoin: () => void;
   onJoinWithoutMedia: () => void;
   onBack: () => void;
-}) {
+};
+
+const PreJoinCard = forwardRef<PreJoinHandle, PreJoinCardProps>(function PreJoinCard({
+  title,
+  subtitle,
+  callStatus,
+  joinError,
+  joining,
+  mediaPreferences,
+  onToggleAudio,
+  onToggleVideo,
+  onJoin,
+  onJoinWithoutMedia,
+  onBack,
+}, ref) {
   const patientIsWaiting = callStatus === "waiting";
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Imperative `releasePreview` so the parent can stop the camera/mic before
+  // <LiveKitRoom> mounts and tries to acquire the same devices.
+  useImperativeHandle(ref, () => ({
+    releasePreview: () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    },
+  }), []);
 
   // Live camera preview
   useEffect(() => {
@@ -664,7 +697,7 @@ function PreJoinCard({
       </div>
     </div>
   );
-}
+});
 
 function MediaToggleCard({
   active,

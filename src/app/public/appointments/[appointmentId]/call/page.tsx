@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LiveKitRoom } from "@livekit/components-react";
@@ -40,6 +40,15 @@ type MediaPreferences = {
   video: boolean;
 };
 
+// Imperative handle exposed by the pre-join card so the parent can release
+// the preview MediaStream's tracks BEFORE <LiveKitRoom> mounts. Without this
+// step the OS still has the camera/mic locked from the preview, and LiveKit's
+// getUserMedia inside the room throws "device in use" — even though React
+// would eventually run the card's cleanup effect.
+type PreJoinHandle = {
+  releasePreview: () => void;
+};
+
 const PATIENT_VIDEO_JOIN_EARLY_MINUTES = 10;
 
 function getPatientJoinWindow(scheduledAt: string, nowMs: number) {
@@ -59,6 +68,10 @@ function PublicCallPageClient() {
   const appointmentId = params.appointmentId;
   const autoResumeAttemptedRef = useRef(false);
   const joinInFlightRef = useRef(false);
+  // Lets us imperatively release the pre-join preview's MediaStream tracks
+  // immediately before mounting <LiveKitRoom>, so the OS frees the camera/mic
+  // before LiveKit's getUserMedia tries to acquire them.
+  const preJoinRef = useRef<PreJoinHandle>(null);
   const resumeStorageKey = `ehomeo:patient-call:${appointmentId}`;
   const resumeAttemptStorageKey = `${resumeStorageKey}:resume-lock`;
 
@@ -200,6 +213,12 @@ function PublicCallPageClient() {
           `/public/appointments/${appointmentId}/video-token`,
           {},
         );
+        // Release the preview's camera/mic before <LiveKitRoom> mounts and
+        // tries to re-acquire the same devices. Without this, LiveKit hits
+        // "device in use" because the OS hasn't freed the lock yet.
+        // The 200 ms gap covers Chrome/Safari device-release latency.
+        preJoinRef.current?.releasePreview();
+        await new Promise((resolve) => setTimeout(resolve, 200));
         setTokenData(data);
         // callStartedAt is set via onConnected when the room actually connects.
       } catch (error) {
@@ -400,6 +419,7 @@ function PublicCallPageClient() {
   if (!tokenData) {
     return (
       <PatientPreJoinCard
+        ref={preJoinRef}
         doctorName={appointment.doctor_name || "Doctor consultation"}
         scheduledAt={appointment.scheduled_at}
         joinError={joinError}
@@ -474,22 +494,7 @@ function PublicCallPageClient() {
 
 // ── Pre-join card ─────────────────────────────────────────────────────────────
 
-function PatientPreJoinCard({
-  doctorName,
-  scheduledAt,
-  joinError,
-  joining,
-  joinLocked,
-  joinWindowMessage,
-  mediaPreferences,
-  preferredFacingMode,
-  onToggleAudio,
-  onToggleVideo,
-  onToggleFacingMode,
-  onJoin,
-  onJoinWithoutMedia,
-  onBack,
-}: {
+type PatientPreJoinCardProps = {
   doctorName: string;
   scheduledAt: string;
   joinError: string | null;
@@ -504,9 +509,43 @@ function PatientPreJoinCard({
   onJoin: () => void;
   onJoinWithoutMedia: () => void;
   onBack: () => void;
-}) {
+};
+
+const PatientPreJoinCard = forwardRef<PreJoinHandle, PatientPreJoinCardProps>(function PatientPreJoinCard({
+  doctorName,
+  scheduledAt,
+  joinError,
+  joining,
+  joinLocked,
+  joinWindowMessage,
+  mediaPreferences,
+  preferredFacingMode,
+  onToggleAudio,
+  onToggleVideo,
+  onToggleFacingMode,
+  onJoin,
+  onJoinWithoutMedia,
+  onBack,
+}, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Expose an imperative `releasePreview` to the parent so it can stop the
+  // preview's MediaStream tracks and clear the <video> element BEFORE
+  // <LiveKitRoom> mounts. We don't rely on the unmount cleanup alone because
+  // there's a race window: LiveKit's getUserMedia in the room can fire before
+  // React has run this card's cleanup, leaving the device locked.
+  useImperativeHandle(ref, () => ({
+    releasePreview: () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    },
+  }), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -707,7 +746,7 @@ function PatientPreJoinCard({
       </motion.div>
     </div>
   );
-}
+});
 
 // ── Small UI helpers ──────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LiveKitRoom } from "@livekit/components-react";
@@ -30,6 +30,14 @@ import type { VideoTokenResponse } from "@/types/doctor";
 
 type MediaPreferences = { audio: boolean; video: boolean };
 
+// Imperative handle exposed by the pre-join card so the parent can release
+// the preview MediaStream's tracks BEFORE <LiveKitRoom> mounts. Avoids the
+// "device in use" race where LiveKit tries to acquire camera/mic before
+// React has run the card's unmount cleanup.
+type PreJoinHandle = {
+  releasePreview: () => void;
+};
+
 const PATIENT_VIDEO_JOIN_EARLY_MINUTES = 10;
 
 function getPatientJoinWindow(scheduledAt: string, nowMs: number) {
@@ -50,6 +58,9 @@ function PatientCallContent() {
   const appointmentId = params.appointmentId;
   const joinInFlightRef = useRef(false);
   const autoResumeAttemptedRef = useRef(false);
+  // Lets us imperatively release the pre-join preview's MediaStream tracks
+  // immediately before mounting <LiveKitRoom> — see PreJoinHandle docstring.
+  const preJoinRef = useRef<PreJoinHandle>(null);
   const autoJoin = searchParams.get("autoJoin") === "1";
   const resumeStorageKey = `ehomeo:patient-auth-call:${appointmentId}`;
   const resumeAttemptStorageKey = `${resumeStorageKey}:resume-lock`;
@@ -177,6 +188,11 @@ function PatientCallContent() {
           `/patient/appointments/${appointmentId}/video-token`,
           {},
         );
+        // Release the preview's camera/mic before <LiveKitRoom> mounts and
+        // tries to re-acquire them. 200 ms covers Chrome/Safari device-release
+        // latency so LiveKit's getUserMedia doesn't see a still-locked device.
+        preJoinRef.current?.releasePreview();
+        await new Promise((resolve) => setTimeout(resolve, 200));
         setTokenData(data);
         // callStartedAt is set via onConnected when the room actually connects.
       } catch (error) {
@@ -316,6 +332,7 @@ function PatientCallContent() {
   if (!tokenData) {
     return (
       <PatientPreJoinScreen
+        ref={preJoinRef}
         doctorName={appointment.doctor_name}
         scheduledAt={appointment.scheduled_at}
         mediaPreferences={mediaPreferences}
@@ -381,22 +398,7 @@ function PatientCallContent() {
   );
 }
 
-function PatientPreJoinScreen({
-  doctorName,
-  scheduledAt,
-  mediaPreferences,
-  preferredFacingMode,
-  joinError,
-  joining,
-  joinLocked,
-  joinWindowMessage,
-  onToggleVideo,
-  onToggleAudio,
-  onToggleFacingMode,
-  onJoin,
-  onJoinWithoutMedia,
-  onBack,
-}: {
+type PatientPreJoinScreenProps = {
   doctorName: string;
   scheduledAt: string;
   mediaPreferences: { audio: boolean; video: boolean };
@@ -411,9 +413,40 @@ function PatientPreJoinScreen({
   onJoin: () => void;
   onJoinWithoutMedia: () => void;
   onBack: () => void;
-}) {
+};
+
+const PatientPreJoinScreen = forwardRef<PreJoinHandle, PatientPreJoinScreenProps>(function PatientPreJoinScreen({
+  doctorName,
+  scheduledAt,
+  mediaPreferences,
+  preferredFacingMode,
+  joinError,
+  joining,
+  joinLocked,
+  joinWindowMessage,
+  onToggleVideo,
+  onToggleAudio,
+  onToggleFacingMode,
+  onJoin,
+  onJoinWithoutMedia,
+  onBack,
+}, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Imperative `releasePreview` so the parent can stop the camera/mic before
+  // <LiveKitRoom> mounts and tries to acquire the same devices.
+  useImperativeHandle(ref, () => ({
+    releasePreview: () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    },
+  }), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -559,7 +592,7 @@ function PatientPreJoinScreen({
       </div>
     </div>
   );
-}
+});
 
 function CallState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
   return (
