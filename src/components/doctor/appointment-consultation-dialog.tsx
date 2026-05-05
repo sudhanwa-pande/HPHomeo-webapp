@@ -428,7 +428,6 @@ export function AppointmentConsultationDialog({
     currentAppointment.status === "confirmed";
   const openConsultationWorkspace = () => {
     setActiveTab("prescription");
-    setPreviewMode(false);
   };
   const canComplete =
     currentAppointment.status === "confirmed" &&

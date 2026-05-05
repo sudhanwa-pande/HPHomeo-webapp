@@ -224,8 +224,6 @@ function DetailContent() {
 
   const [activeStep, setActiveStep] = useState<StepKey>("overview");
   const [draftPayload, setDraftPayload] = useState<PrescriptionPayload | null>(null);
-  const [previewMode, setPreviewMode] = useState(false);
-  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [saveTemplateDialogOpen, setSaveTemplateDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -492,12 +490,6 @@ function DetailContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload, hasUnsavedChanges, isFinalized, canManagePrescription]);
 
-  // Cleanup blob URLs
-  useEffect(() => {
-    return () => {
-      if (previewPdfUrl?.startsWith("blob:")) URL.revokeObjectURL(previewPdfUrl);
-    };
-  }, [previewPdfUrl]);
 
   /* ── prescription field handlers ───────────────────────────────── */
 
@@ -570,24 +562,11 @@ function DetailContent() {
       notifyInfo("Preview unavailable", "Only for confirmed/completed appointments.");
       return;
     }
-    if (previewMode) {
-      setPreviewPdfUrl((current) => {
-        if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
-        return isFinalized ? current : null;
-      });
-      setPreviewMode(false);
-      return;
-    }
     await previewMutation.mutateAsync(payload);
   };
 
   const applyTemplate = (template: PrescriptionTemplate) => {
     setDraftPayload(normalizePayload(template.payload));
-    setPreviewPdfUrl((current) => {
-      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
-      return null;
-    });
-    setPreviewMode(false);
     setTemplateDialogOpen(false);
     notifyInfo("Template applied", `${template.name} loaded.`);
   };
@@ -903,8 +882,6 @@ function DetailContent() {
                     hasDraft={hasDraft}
                     canManage={canManagePrescription}
                     hasUnsavedChanges={hasUnsavedChanges}
-                    previewMode={previewMode}
-                    previewPdfUrl={previewPdfUrl}
                     templates={templates}
                     templateDialogOpen={templateDialogOpen}
                     setTemplateDialogOpen={setTemplateDialogOpen}
@@ -1303,8 +1280,6 @@ function PrescriptionSection({
   hasDraft,
   canManage,
   hasUnsavedChanges,
-  previewMode,
-  previewPdfUrl,
   templates,
   templateDialogOpen,
   setTemplateDialogOpen,
@@ -1332,8 +1307,6 @@ function PrescriptionSection({
   hasDraft: boolean;
   canManage: boolean;
   hasUnsavedChanges: boolean;
-  previewMode: boolean;
-  previewPdfUrl: string | null;
   templates: PrescriptionTemplate[];
   templateDialogOpen: boolean;
   setTemplateDialogOpen: (v: boolean) => void;
@@ -1378,7 +1351,7 @@ function PrescriptionSection({
             loading={previewPending}
           >
             <Eye className="h-3.5 w-3.5" />
-            {previewMode ? "Edit" : "Preview"}
+            Preview
           </Button>
         </div>
 
