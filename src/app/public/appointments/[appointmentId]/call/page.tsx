@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LiveKitRoom } from "@livekit/components-react";
@@ -40,14 +40,6 @@ type MediaPreferences = {
   video: boolean;
 };
 
-// Imperative handle exposed by the pre-join card so the parent can release
-// the preview MediaStream's tracks BEFORE <LiveKitRoom> mounts. Without this
-// step the OS still has the camera/mic locked from the preview, and LiveKit's
-// getUserMedia inside the room throws "device in use" — even though React
-// would eventually run the card's cleanup effect.
-type PreJoinHandle = {
-  releasePreview: () => void;
-};
 
 const PATIENT_VIDEO_JOIN_EARLY_MINUTES = 10;
 
@@ -66,12 +58,8 @@ function PublicCallPageClient() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const appointmentId = params.appointmentId;
-  const autoResumeAttemptedRef = useRef(false);
   const joinInFlightRef = useRef(false);
-  // Lets us imperatively release the pre-join preview's MediaStream tracks
-  // immediately before mounting <LiveKitRoom>, so the OS frees the camera/mic
-  // before LiveKit's getUserMedia tries to acquire them.
-  const preJoinRef = useRef<PreJoinHandle>(null);
+
   const resumeStorageKey = `ehomeo:patient-call:${appointmentId}`;
   const resumeAttemptStorageKey = `${resumeStorageKey}:resume-lock`;
 
@@ -213,12 +201,6 @@ function PublicCallPageClient() {
           `/public/appointments/${appointmentId}/video-token`,
           {},
         );
-        // Release the preview's camera/mic before <LiveKitRoom> mounts and
-        // tries to re-acquire the same devices. Without this, LiveKit hits
-        // "device in use" because the OS hasn't freed the lock yet.
-        // The 200 ms gap covers Chrome/Safari device-release latency.
-        preJoinRef.current?.releasePreview();
-        await new Promise((resolve) => setTimeout(resolve, 200));
         setTokenData(data);
         // callStartedAt is set via onConnected when the room actually connects.
       } catch (error) {
@@ -301,43 +283,13 @@ function PublicCallPageClient() {
     return () => window.clearInterval(timer);
   }, []);
 
-  // Auto-resume from sessionStorage if user refreshed mid-call
+  // Auto-join immediately
+  const autoJoinAttemptedRef = useRef(false);
   useEffect(() => {
-    if (autoResumeAttemptedRef.current || tokenData || joining || !canAttemptJoinNow) return;
-    if (typeof window === "undefined") return;
-
-    const saved = window.sessionStorage.getItem(resumeStorageKey);
-    if (!saved) return;
-
-    const existingResumeLock = Number(window.sessionStorage.getItem(resumeAttemptStorageKey) || 0);
-    if (
-      Number.isFinite(existingResumeLock) &&
-      existingResumeLock > 0 &&
-      Date.now() - existingResumeLock < 10_000
-    ) return;
-
-    window.sessionStorage.setItem(resumeAttemptStorageKey, String(Date.now()));
-    autoResumeAttemptedRef.current = true;
-
-    try {
-      const parsed = JSON.parse(saved) as Partial<MediaPreferences> & { facingMode?: CameraFacingMode };
-      const nextPreferences = { audio: parsed.audio ?? true, video: parsed.video ?? true };
-      setMediaPreferences(nextPreferences);
-      const nextFacingMode = parsed.facingMode ?? "user";
-      setPreferredFacingMode(nextFacingMode);
-      void joinCall({ ...nextPreferences, facingMode: nextFacingMode });
-    } catch {
-      clearResumeState();
-    }
-  }, [
-    canAttemptJoinNow,
-    clearResumeState,
-    joinCall,
-    joining,
-    resumeAttemptStorageKey,
-    resumeStorageKey,
-    tokenData,
-  ]);
+    if (autoJoinAttemptedRef.current || tokenData || joining || !canAttemptJoinNow) return;
+    autoJoinAttemptedRef.current = true;
+    void joinCall({ audio: true, video: true, facingMode: "user" });
+  }, [canAttemptJoinNow, joinCall, joining, tokenData]);
 
   // ── Loading ───────────────────────────────────────────────────────
   if (!accessReady || appointmentQuery.isLoading) {
@@ -415,35 +367,46 @@ function PublicCallPageClient() {
     );
   }
 
-  // ── Pre-join ─────────────────────────────────────────────────────
+  if (joinError) {
+    return (
+      <CallState
+        title="Could not join call"
+        description={joinError}
+        action={
+          <div className="mt-6 flex w-full flex-col gap-3 sm:max-w-xs mx-auto">
+            <Button className="rounded-xl w-full bg-brand text-white hover:bg-brand/90" onClick={() => {
+              joinInFlightRef.current = false;
+              void joinCall({ audio: true, video: true, facingMode: "user" });
+            }}>
+              Try again
+            </Button>
+            <Button variant="outline" className="rounded-xl w-full border-white/10 bg-white/[0.03] text-white/50 transition-all hover:bg-white/[0.07] hover:text-white/75" onClick={() => {
+              joinInFlightRef.current = false;
+              void joinCall({ audio: false, video: false });
+            }}>
+              Join without media
+            </Button>
+            <Button variant="ghost" className="rounded-xl w-full text-white/25 transition-colors hover:text-white/55" onClick={() => {
+              clearResumeState();
+              router.push(`/public/appointments/${appointmentId}`);
+            }}>
+              Back to appointment
+            </Button>
+          </div>
+        }
+      />
+    );
+  }
+
   if (!tokenData) {
     return (
-      <PatientPreJoinCard
-        ref={preJoinRef}
-        doctorName={appointment.doctor_name || "Doctor consultation"}
-        scheduledAt={appointment.scheduled_at}
-        joinError={joinError}
-        joining={joining}
-        joinLocked={Boolean(joinWindow?.tooEarly)}
-        joinWindowMessage={
-          joinWindow?.tooEarly
-            ? formatEarlyJoinDescription(appointment.scheduled_at, joinWindow.opensAt)
-            : null
-        }
-        mediaPreferences={mediaPreferences}
-        preferredFacingMode={preferredFacingMode}
-        onToggleAudio={() => setMediaPreferences((p) => ({ ...p, audio: !p.audio }))}
-        onToggleVideo={() => setMediaPreferences((p) => ({ ...p, video: !p.video }))}
-        onToggleFacingMode={() =>
-          setPreferredFacingMode((p) => (p === "user" ? "environment" : "user"))
-        }
-        onJoin={() => void joinCall()}
-        onJoinWithoutMedia={() => void joinCall({ audio: false, video: false })}
-        onBack={() => {
-          clearResumeState();
-          router.push(`/public/appointments/${appointmentId}`);
-        }}
-      />
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#060B14]">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-brand/20 blur-2xl" />
+          <Loader2 className="relative h-7 w-7 animate-spin text-brand" />
+        </div>
+        <p className="text-sm text-white/30">Entering room&hellip;</p>
+      </div>
     );
   }
 
@@ -491,262 +454,6 @@ function PublicCallPageClient() {
     </LiveKitRoom>
   );
 }
-
-// ── Pre-join card ─────────────────────────────────────────────────────────────
-
-type PatientPreJoinCardProps = {
-  doctorName: string;
-  scheduledAt: string;
-  joinError: string | null;
-  joining: boolean;
-  joinLocked: boolean;
-  joinWindowMessage: string | null;
-  mediaPreferences: MediaPreferences;
-  preferredFacingMode: CameraFacingMode;
-  onToggleAudio: () => void;
-  onToggleVideo: () => void;
-  onToggleFacingMode: () => void;
-  onJoin: () => void;
-  onJoinWithoutMedia: () => void;
-  onBack: () => void;
-};
-
-const PatientPreJoinCard = forwardRef<PreJoinHandle, PatientPreJoinCardProps>(function PatientPreJoinCard({
-  doctorName,
-  scheduledAt,
-  joinError,
-  joining,
-  joinLocked,
-  joinWindowMessage,
-  mediaPreferences,
-  preferredFacingMode,
-  onToggleAudio,
-  onToggleVideo,
-  onToggleFacingMode,
-  onJoin,
-  onJoinWithoutMedia,
-  onBack,
-}, ref) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  // Expose an imperative `releasePreview` to the parent so it can stop the
-  // preview's MediaStream tracks and clear the <video> element BEFORE
-  // <LiveKitRoom> mounts. We don't rely on the unmount cleanup alone because
-  // there's a race window: LiveKit's getUserMedia in the room can fire before
-  // React has run this card's cleanup, leaving the device locked.
-  useImperativeHandle(ref, () => ({
-    releasePreview: () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
-    },
-  }), []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function startPreview() {
-      if (!mediaPreferences.video) {
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((t) => t.stop());
-          streamRef.current = null;
-        }
-        return;
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: preferredFacingMode, width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: false,
-        });
-        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
-        streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      } catch { /* preview is best-effort */ }
-    }
-    void startPreview();
-    return () => {
-      cancelled = true;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-    };
-  }, [mediaPreferences.video, preferredFacingMode]);
-
-  return (
-    <div className="relative flex min-h-screen items-center justify-center bg-[#060B14] px-4 py-8">
-      {/* Ambient brand glow */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute left-1/2 top-1/3 h-[600px] w-[800px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/[0.045] blur-[130px]" />
-        <div className="absolute right-0 top-0 h-[300px] w-[300px] rounded-full bg-brand-accent/[0.03] blur-[100px]" />
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="relative w-full max-w-4xl"
-      >
-        <div className="grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
-          {/* ── Camera preview ── */}
-          <section className="relative overflow-hidden rounded-[2rem] bg-[#0C1018] ring-1 ring-white/[0.05]">
-            <div className="relative aspect-[4/3] w-full lg:aspect-auto lg:h-full lg:min-h-[500px]">
-              {mediaPreferences.video ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="h-full w-full object-cover"
-                  style={{ transform: preferredFacingMode === "user" ? "scaleX(-1)" : undefined }}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <div className="text-center">
-                    <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-white/[0.04] ring-1 ring-white/[0.06]">
-                      <User className="h-9 w-9 text-white/15" />
-                    </div>
-                    <p className="mt-3 text-sm text-white/20">Camera is off</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Bottom overlay */}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-5 pb-5 pt-14">
-                <p className="text-base font-semibold text-white/90">{doctorName}</p>
-                <p className="mt-0.5 text-sm text-white/40">
-                  {format(parseISO(scheduledAt), "EEE, dd MMM yyyy · hh:mm a")}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <MediaChip
-                    on={mediaPreferences.video}
-                    OnIcon={Camera}
-                    OffIcon={CameraOff}
-                    onLabel="Camera on"
-                    offLabel="Camera off"
-                  />
-                  <MediaChip
-                    on={mediaPreferences.audio}
-                    OnIcon={Mic}
-                    OffIcon={MicOff}
-                    onLabel="Mic on"
-                    offLabel="Muted"
-                  />
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* ── Setup panel ── */}
-          <section className="flex flex-col rounded-[2rem] border border-white/[0.07] bg-white/[0.03] p-6 backdrop-blur-sm sm:p-7">
-            <Image
-              src="/images/logo.png"
-              alt="eHomeo"
-              width={120}
-              height={38}
-              className="h-6 w-auto brightness-[1.75] saturate-0"
-            />
-
-            <h1 className="mt-5 text-2xl font-bold tracking-tight text-white/90">Join consultation</h1>
-            <p className="mt-1 text-sm text-white/35">
-              {format(parseISO(scheduledAt), "EEE, dd MMM yyyy · hh:mm a")}
-            </p>
-
-            {/* Media toggles */}
-            <div className="mt-6 space-y-2.5">
-              <ToggleRow
-                label="Camera"
-                sublabel={mediaPreferences.video ? "Joining with video" : "Joining without camera"}
-                enabled={mediaPreferences.video}
-                OnIcon={Camera}
-                OffIcon={CameraOff}
-                onToggle={onToggleVideo}
-              />
-              <ToggleRow
-                label="Microphone"
-                sublabel={mediaPreferences.audio ? "Joining with audio" : "Joining muted"}
-                enabled={mediaPreferences.audio}
-                OnIcon={Mic}
-                OffIcon={MicOff}
-                onToggle={onToggleAudio}
-              />
-            </div>
-
-            {/* Camera mode */}
-            {mediaPreferences.video && (
-              <div className="mt-2.5 flex items-center justify-between rounded-2xl border border-white/[0.07] bg-white/[0.03] p-3.5">
-                <div>
-                  <p className="text-sm font-medium text-white/80">Camera mode</p>
-                  <p className="text-xs text-white/30">{getFacingModeLabel(preferredFacingMode)}</p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-full border-white/15 bg-white/[0.05] text-white/60 hover:bg-white/10 hover:text-white/85"
-                  onClick={onToggleFacingMode}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  {preferredFacingMode === "user" ? "Use back" : "Use front"}
-                </Button>
-              </div>
-            )}
-
-            {/* Error notice */}
-            {joinError && !joinLocked && (
-              <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/[0.07] p-4 text-sm">
-                <p className="font-semibold text-red-400">Could not start media</p>
-                <p className="mt-1 leading-relaxed text-red-400/70">{joinError}</p>
-              </div>
-            )}
-
-            {/* Too-early notice */}
-            {joinLocked && joinWindowMessage && (
-              <div className="mt-4 rounded-2xl border border-brand/20 bg-brand/[0.07] p-4 text-sm">
-                <p className="font-semibold text-brand/90">Call not open yet</p>
-                <p className="mt-1 leading-relaxed text-white/35">{joinWindowMessage}</p>
-              </div>
-            )}
-
-            {/* CTAs */}
-            <div className="mt-auto space-y-2.5 pt-6">
-              <Button
-                className="h-12 w-full rounded-2xl bg-brand-accent text-sm font-semibold text-brand-dark shadow-[0_8px_32px_rgba(216,238,83,0.18)] transition-all hover:-translate-y-px hover:bg-[#d0e64b] hover:shadow-[0_14px_40px_rgba(216,238,83,0.26)] disabled:opacity-60"
-                loading={joining}
-                disabled={joinLocked}
-                onClick={onJoin}
-              >
-                <Video className="h-4 w-4" />
-                {joinLocked ? "Join unavailable" : "Join now"}
-              </Button>
-              <Button
-                variant="outline"
-                className="h-11 w-full rounded-2xl border-white/10 bg-white/[0.03] text-sm text-white/50 transition-all hover:bg-white/[0.07] hover:text-white/75 disabled:opacity-40"
-                disabled={joining || joinLocked}
-                onClick={onJoinWithoutMedia}
-              >
-                <Phone className="h-4 w-4" />
-                Join without media
-              </Button>
-            </div>
-
-            <button
-              type="button"
-              className="mt-5 inline-flex items-center gap-1.5 text-sm text-white/25 transition-colors hover:text-white/55"
-              onClick={onBack}
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back to appointment
-            </button>
-          </section>
-        </div>
-      </motion.div>
-    </div>
-  );
-});
 
 // ── Small UI helpers ──────────────────────────────────────────────────────────
 

@@ -11,11 +11,14 @@ import {
   Copy,
   CreditCard,
   Download,
+  ExternalLink,
   Eye,
   FileText,
   IndianRupee,
   LayoutTemplate,
   Loader2,
+  MapPin,
+  MonitorPlay,
   Plus,
   Receipt as ReceiptIcon,
   Save,
@@ -24,6 +27,7 @@ import {
   Video,
 } from "lucide-react";
 
+import { openPdfBlob, fetchAndOpenPdf } from "@/lib/pdf";
 import api from "@/lib/api";
 import { notifyApiError, notifyError, notifyInfo, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
@@ -246,8 +250,6 @@ export function AppointmentConsultationDialog({
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("overview");
   const [draftPayload, setDraftPayload] = useState<PrescriptionPayload | null>(null);
-  const [previewMode, setPreviewMode] = useState(false);
-  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [saveTemplateDialogOpen, setSaveTemplateDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -357,13 +359,6 @@ export function AppointmentConsultationDialog({
       return data;
     },
     onSuccess: (data) => {
-      setPreviewPdfUrl((current) => {
-        if (current?.startsWith("blob:")) {
-          URL.revokeObjectURL(current);
-        }
-        return api.getUri({ url: `/doctor/appointments/${appointmentId}/prescription/pdf/view` });
-      });
-      setPreviewMode(true);
       queryClient.setQueryData<PrescriptionResponse>(["doctor-appointment-prescription", appointmentId], {
         exists: true,
         prescription: data.prescription,
@@ -404,9 +399,8 @@ export function AppointmentConsultationDialog({
   });
 
   const openPdfMutation = useMutation({
-    mutationFn: async () => api.getUri({ url: `/doctor/appointments/${appointmentId}/prescription/pdf/view` }),
-    onSuccess: (pdfUrl) => {
-      window.open(pdfUrl, "_blank", "noopener,noreferrer");
+    mutationFn: async () => {
+      await fetchAndOpenPdf(`/doctor/appointments/${appointmentId}/prescription/pdf/view`);
     },
     onError: (error) => notifyApiError(error, "Couldn't open prescription PDF"),
   });
@@ -414,39 +408,19 @@ export function AppointmentConsultationDialog({
   const previewMutation = useMutation({
     mutationFn: async (nextPayload: PrescriptionPayload) => {
       if (isFinalized) {
-        return {
-          url: api.getUri({ url: `/doctor/appointments/${appointmentId}/prescription/pdf/view` }),
-          ephemeral: false,
-        };
+        return await api.get(`/doctor/appointments/${appointmentId}/prescription/pdf/view`, { responseType: 'blob' }).then(res => res.data as Blob);
       }
 
       const response = await api.post(`/doctor/appointments/${appointmentId}/prescription/preview`, preparePayloadForApi(nextPayload), {
         responseType: "blob",
       });
-      return {
-        url: URL.createObjectURL(response.data as Blob),
-        ephemeral: true,
-      };
+      return response.data as Blob;
     },
-    onSuccess: ({ url }) => {
-      setPreviewPdfUrl((current) => {
-        if (current?.startsWith("blob:")) {
-          URL.revokeObjectURL(current);
-        }
-        return url;
-      });
-      setPreviewMode(true);
+    onSuccess: (blob) => {
+      openPdfBlob(blob);
     },
     onError: (error) => notifyApiError(error, "Couldn't build prescription preview"),
   });
-
-  useEffect(() => {
-    return () => {
-      if (previewPdfUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(previewPdfUrl);
-      }
-    };
-  }, [previewPdfUrl]);
 
   const canStartConsultation =
     currentAppointment.mode === "online" &&
@@ -565,17 +539,6 @@ export function AppointmentConsultationDialog({
       return;
     }
 
-    if (previewMode) {
-      setPreviewPdfUrl((current) => {
-        if (current?.startsWith("blob:")) {
-          URL.revokeObjectURL(current);
-        }
-        return isFinalized ? current : null;
-      });
-      setPreviewMode(false);
-      return;
-    }
-
     await previewMutation.mutateAsync(payload);
   };
 
@@ -595,13 +558,6 @@ export function AppointmentConsultationDialog({
 
   const applyTemplate = (template: PrescriptionTemplate) => {
     setDraftPayload(normalizePayload(template.payload));
-    setPreviewPdfUrl((current) => {
-      if (current?.startsWith("blob:")) {
-        URL.revokeObjectURL(current);
-      }
-      return null;
-    });
-    setPreviewMode(false);
     setTemplateDialogOpen(false);
     notifyInfo("Template applied", `${template.name} has been loaded into this prescription.`);
   };
@@ -847,7 +803,7 @@ export function AppointmentConsultationDialog({
                           loading={previewMutation.isPending}
                         >
                           <Eye className="h-4 w-4" />
-                          {previewMode ? "Form Mode" : "Preview PDF"}
+                          Preview PDF
                         </Button>
                         <Button
                           variant="outline"
@@ -879,10 +835,8 @@ export function AppointmentConsultationDialog({
                             <span className="font-semibold">{currentAppointment.status.replace("_", " ")}</span>.
                           </div>
                         ) : null}
-                        {!previewMode ? (
-                          <>
-                            <SectionShell
-                              title="Auto-filled patient header"
+                        <SectionShell
+                          title="Auto-filled patient header"
                               description="These details are pulled from the appointment and used in the final prescription."
                             >
                               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -1015,29 +969,6 @@ export function AppointmentConsultationDialog({
                                 className="rounded-2xl"
                               />
                             </SectionShell>
-                          </>
-                        ) : (
-                          <SectionShell title="PDF preview" description="This is the same prescription layout the patient will receive.">
-                            <div className="overflow-hidden rounded-[24px] border border-border/60 bg-white shadow-[0_14px_30px_rgba(15,23,42,0.04)]">
-                              {previewMutation.isPending ? (
-                                <div className="flex h-[760px] items-center justify-center text-sm text-brand-subtext">
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Building prescription preview...
-                                </div>
-                              ) : previewPdfUrl ? (
-                                <iframe
-                                  src={previewPdfUrl}
-                                  title="Prescription preview"
-                                  className="h-[760px] w-full bg-white"
-                                />
-                              ) : (
-                                <div className="flex h-[760px] items-center justify-center text-sm text-brand-subtext">
-                                  Preview is not ready yet.
-                                </div>
-                              )}
-                            </div>
-                          </SectionShell>
-                        )}
                       </div>
 
                       <div className="space-y-4">
@@ -1062,10 +993,6 @@ export function AppointmentConsultationDialog({
                               {
                                 label: "Draft saved",
                                 done: hasDraft || isFinalized,
-                              },
-                              {
-                                label: "Preview checked",
-                                done: Boolean(previewPdfUrl),
                               },
                               {
                                 label: "Prescription finalized",
@@ -1183,11 +1110,7 @@ export function AppointmentConsultationDialog({
                             variant="outline"
                             className="gap-1.5"
                             onClick={() =>
-                              window.open(
-                                api.getUri({ url: `/doctor/appointments/${appointmentId}/receipt/pdf/view` }),
-                                "_blank",
-                                "noopener,noreferrer",
-                              )
+                              fetchAndOpenPdf(`/doctor/appointments/${appointmentId}/receipt/pdf/view`)
                             }
                           >
                             <Download className="h-3.5 w-3.5" />

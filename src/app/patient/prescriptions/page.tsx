@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 
 import api from "@/lib/api";
+import { fetchAndOpenPdf } from "@/lib/pdf";
+import { notifyError } from "@/lib/notify";
 import { AuthGuard } from "@/components/auth-guard";
 import { PatientShell } from "@/components/patient/patient-shell";
 import { Button } from "@/components/ui/button";
@@ -75,15 +77,9 @@ function PrescriptionsContent() {
 
   async function handleDownload(appointmentId: string) {
     try {
-      const { data } = await api.get<{ pdf_url: string }>(
-        `/patient/appointments/${appointmentId}/prescription/pdf`,
-      );
-      if (data.pdf_url) {
-        window.open(data.pdf_url, "_blank");
-      }
+      await fetchAndOpenPdf(`/patient/appointments/${appointmentId}/prescription/pdf/view`);
     } catch {
-      const url = `${process.env.NEXT_PUBLIC_API_URL}/patient/appointments/${appointmentId}/prescription/pdf/view`;
-      window.open(url, "_blank");
+      notifyError("Couldn't open prescription PDF");
     }
   }
 

@@ -32,6 +32,7 @@ import {
   Video,
 } from "lucide-react";
 
+import { openPdfBlob, fetchAndOpenPdf } from "@/lib/pdf";
 import api from "@/lib/api";
 import { notifyApiError, notifyError, notifyInfo, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
@@ -406,13 +407,6 @@ function DetailContent() {
       return data;
     },
     onSuccess: (data) => {
-      setPreviewPdfUrl((current) => {
-        if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
-        return api.getUri({
-          url: `/doctor/appointments/${appointmentId}/prescription/pdf/view`,
-        });
-      });
-      setPreviewMode(true);
       queryClient.setQueryData<PrescriptionResponse>(
         ["doctor-appointment-prescription", appointmentId],
         { exists: true, prescription: data.prescription },
@@ -461,26 +455,20 @@ function DetailContent() {
   const previewMutation = useMutation({
     mutationFn: async (nextPayload: PrescriptionPayload) => {
       if (isFinalized) {
-        return {
-          url: api.getUri({
-            url: `/doctor/appointments/${appointmentId}/prescription/pdf/view`,
-          }),
-          ephemeral: false,
-        };
+        return await api.get(
+          `/doctor/appointments/${appointmentId}/prescription/pdf/view`,
+          { responseType: "blob" }
+        ).then(res => res.data as Blob);
       }
       const response = await api.post(
         `/doctor/appointments/${appointmentId}/prescription/preview`,
         preparePayloadForApi(nextPayload),
         { responseType: "blob" },
       );
-      return { url: URL.createObjectURL(response.data as Blob), ephemeral: true };
+      return response.data as Blob;
     },
-    onSuccess: ({ url }) => {
-      setPreviewPdfUrl((current) => {
-        if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
-        return url;
-      });
-      setPreviewMode(true);
+    onSuccess: (blob) => {
+      openPdfBlob(blob);
     },
     onError: (error) =>
       notifyApiError(error, "Couldn't build prescription preview"),
@@ -791,13 +779,7 @@ function DetailContent() {
                   variant="outline"
                   className="rounded-xl"
                   onClick={() => {
-                    window.open(
-                      api.getUri({
-                        url: `/doctor/appointments/${appointmentId}/prescription/pdf/view`,
-                      }),
-                      "_blank",
-                      "noopener,noreferrer",
-                    );
+                    fetchAndOpenPdf(`/doctor/appointments/${appointmentId}/prescription/pdf/view`);
                   }}
                 >
                   <Eye className="h-4 w-4" />
@@ -1439,18 +1421,7 @@ function PrescriptionSection({
         </div>
       )}
 
-      {/* Preview mode */}
-      {previewMode && previewPdfUrl ? (
-        <SectionShell title="Prescription Preview">
-          <iframe
-            src={previewPdfUrl}
-            className="h-[70vh] w-full rounded-xl border border-border/40"
-            title="Prescription preview"
-          />
-        </SectionShell>
-      ) : (
-        <>
-          {/* Patient header (auto-filled, read-only) */}
+      {/* Patient header (auto-filled, read-only) */}
           <SectionShell
             title="Patient Details"
             description="Auto-filled from appointment"
@@ -1566,8 +1537,6 @@ function PrescriptionSection({
               className="rounded-xl"
             />
           </SectionShell>
-        </>
-      )}
 
       {/* Template dialogs */}
       <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
@@ -2090,7 +2059,7 @@ function ReceiptSection({
               size="sm"
               className="rounded-xl"
               onClick={() =>
-                window.open(pdfUrl, "_blank", "noopener,noreferrer")
+                fetchAndOpenPdf(`/doctor/appointments/${appointmentId}/receipt/pdf/view`)
               }
             >
               <Download className="h-3.5 w-3.5" />
@@ -2118,14 +2087,6 @@ function ReceiptSection({
         </div>
       </SectionShell>
 
-      {/* Inline PDF preview */}
-      <SectionShell title="Receipt Preview">
-        <iframe
-          src={pdfUrl}
-          className="h-[60vh] w-full rounded-xl border border-border/40"
-          title="Receipt preview"
-        />
-      </SectionShell>
     </div>
   );
 }

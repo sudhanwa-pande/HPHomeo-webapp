@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import api from "@/lib/api";
+import { fetchAndOpenPdf } from "@/lib/pdf";
 import { AuthGuard } from "@/components/auth-guard";
 import { DoctorShell } from "@/components/doctor/doctor-shell";
 import { DataTable, PageHeader, SectionCard, StatCard, StatusBadge } from "@/components/doctor/ui";
@@ -364,13 +365,7 @@ function PatientPrescriptionHistory({
             <button
               type="button"
               onClick={() =>
-                window.open(
-                  api.getUri({
-                    url: `/doctor/appointments/${row.original.appointment_id}/prescription/pdf/view`,
-                  }),
-                  "_blank",
-                  "noopener,noreferrer"
-                )
+                fetchAndOpenPdf(`/doctor/appointments/${row.original.appointment_id}/prescription/pdf/view`)
               }
               className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline"
             >
@@ -443,13 +438,7 @@ function PatientPrescriptionHistory({
             <button
               type="button"
               onClick={() =>
-                window.open(
-                  api.getUri({
-                    url: `/doctor/appointments/${row.original.appointment_id}/receipt/pdf/view`,
-                  }),
-                  "_blank",
-                  "noopener,noreferrer"
-                )
+                fetchAndOpenPdf(`/doctor/appointments/${row.original.appointment_id}/receipt/pdf/view`)
               }
               className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline"
             >
