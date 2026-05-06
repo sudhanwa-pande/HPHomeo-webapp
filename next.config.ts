@@ -36,7 +36,7 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://res.cloudinary.com",
               "font-src 'self'",
-              "connect-src 'self' https://*.razorpay.com wss://*.livekit.cloud" +
+              "connect-src 'self' https://*.razorpay.com wss://*.livekit.cloud https://*.livekit.cloud" +
                 // Only append NEXT_PUBLIC_API_URL when it's an absolute URL.
                 // Relative paths like "/api/v1" aren't valid CSP sources and
                 // get ignored by the browser (with a console warning).
