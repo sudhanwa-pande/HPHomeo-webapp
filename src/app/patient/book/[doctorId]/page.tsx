@@ -16,7 +16,10 @@ import {
   User,
   Wallet,
   CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
+
+import { useEffect, useRef } from "react";
 
 import api, { getApiError } from "@/lib/api";
 import { beginPatientAppointmentPayment } from "@/lib/patient-payment";
@@ -43,7 +46,17 @@ const fadeVariants = {
   exit: { opacity: 0, y: -8, transition: { duration: 0.2 } },
 };
 
-type BookingStep = "select-date" | "select-mode" | "confirm" | "processing" | "success";
+type BookingStep = "select-date" | "select-mode" | "confirm" | "processing" | "verifying" | "failed" | "success";
+
+const VERIFICATION_KEY = "hphomeo:v1:payment_verification";
+
+interface VerificationState {
+  version: number;
+  appointmentId: string;
+  bookingData: BookingResponse;
+  startedAt: number;
+  expiresAt: number;
+}
 
 function BookingContent() {
   const router = useRouter();
@@ -107,8 +120,14 @@ function BookingContent() {
             patientEmail: patient?.email,
             patientPhone: patient?.phone,
             description: `Consultation with ${doctor?.full_name || "Doctor"}`,
-            onSuccess: () => resolve(bookingData),
-            onDismiss: () => reject(new Error("PAYMENT_DISMISSED")),
+            onSuccess: () => {
+              console.log("Payment success callback received from Razorpay.");
+              resolve(bookingData);
+            },
+            onDismiss: () => {
+              console.log("Razorpay checkout dismissed.");
+              reject(new Error("PAYMENT_DISMISSED"));
+            },
           })
             .then((orderData) => {
               if (orderData.message === "already_paid") {
@@ -125,7 +144,18 @@ function BookingContent() {
     },
     onSuccess: (data) => {
       setBookedData(data);
-      setStep("success");
+      if (needsPayment && data.status === "pending_payment") {
+        setStep("verifying");
+        localStorage.setItem(VERIFICATION_KEY, JSON.stringify({
+          version: 1,
+          appointmentId: data.appointment_id,
+          bookingData: data,
+          startedAt: Date.now(),
+          expiresAt: Date.now() + 5 * 60 * 1000
+        }));
+      } else {
+        setStep("success");
+      }
     },
     onError: (error) => {
       setStep("confirm");
@@ -141,6 +171,119 @@ function BookingContent() {
   const stepLabels = ["Date & Time", "Consultation", "Confirm"];
   const stepOrder: BookingStep[] = ["select-date", "select-mode", "confirm"];
   const currentIdx = stepOrder.indexOf(step);
+
+  // Restore verification state from localStorage
+  useEffect(() => {
+    const restoreVerification = async () => {
+      try {
+        const stored = localStorage.getItem(VERIFICATION_KEY);
+        if (!stored) return;
+
+        const parsed: VerificationState = JSON.parse(stored);
+        if (parsed.version !== 1) return;
+
+        if (Date.now() > parsed.expiresAt) {
+          localStorage.removeItem(VERIFICATION_KEY);
+          return;
+        }
+
+        // Fetch immediate status
+        const { data } = await api.get(`/patient/appointments/${parsed.appointmentId}`);
+
+        const isPaid = data.status === "confirmed" && data.payment_status === "paid";
+        const isFailed = data.payment_status === "failed" || data.payment_status === "refunded" || data.status === "cancelled";
+
+        if (isPaid) {
+          setBookedData(parsed.bookingData);
+          setStep("success");
+          localStorage.removeItem(VERIFICATION_KEY);
+          return;
+        }
+
+        if (isFailed) {
+          setBookedData(parsed.bookingData);
+          setStep("failed");
+          localStorage.removeItem(VERIFICATION_KEY);
+          return;
+        }
+
+        // Still pending
+        setBookedData(parsed.bookingData);
+        setStep("verifying");
+      } catch (err) {
+        // Silently ignore storage parse or immediate fetch errors and wait for polling
+      }
+    };
+    restoreVerification();
+  }, []);
+
+  const attemptsRef = useRef(0);
+  const pollingActiveRef = useRef(false);
+
+  // Polling for webhook eventual consistency
+  useEffect(() => {
+    if (step !== "verifying" || !bookedData) {
+      pollingActiveRef.current = false;
+      return;
+    }
+
+    if (pollingActiveRef.current) return;
+    pollingActiveRef.current = true;
+
+    attemptsRef.current = 0;
+    const maxAttempts = 6; // 18 seconds max
+    let timeoutId: NodeJS.Timeout;
+    const abortController = new AbortController();
+
+    const checkStatus = async () => {
+      attemptsRef.current++;
+      try {
+        console.log(`Polling appointment status (attempt ${attemptsRef.current}/${maxAttempts})...`);
+        const { data } = await api.get(`/patient/appointments/${bookedData.appointment_id}`, {
+          signal: abortController.signal
+        });
+
+        const isPaid = data.status === "confirmed" && data.payment_status === "paid";
+        const isFailed = data.payment_status === "failed" || data.payment_status === "refunded" || data.status === "cancelled";
+
+        if (isPaid) {
+          console.log("Payment verified successfully on backend.");
+          setStep("success");
+          localStorage.removeItem(VERIFICATION_KEY);
+          pollingActiveRef.current = false;
+          return;
+        }
+
+        if (isFailed) {
+          console.error("Payment failed or cancelled during verification.");
+          setStep("failed");
+          localStorage.removeItem(VERIFICATION_KEY);
+          pollingActiveRef.current = false;
+          return;
+        }
+      } catch (err: any) {
+        if (err.name === "CanceledError" || err.message === "canceled") return;
+        console.error("Error polling appointment status:", err);
+      }
+
+      if (attemptsRef.current >= maxAttempts) {
+        console.error("Payment verification timed out.");
+        setStep("failed");
+        localStorage.removeItem(VERIFICATION_KEY);
+        pollingActiveRef.current = false;
+      } else {
+        timeoutId = setTimeout(checkStatus, 3000);
+      }
+    };
+
+    checkStatus();
+
+    return () => {
+      clearTimeout(timeoutId);
+      abortController.abort();
+      pollingActiveRef.current = false;
+    };
+  }, [step, bookedData]);
 
   const stepData = useMemo(() => {
     return stepLabels.map((label, i) => ({
@@ -272,8 +415,8 @@ function BookingContent() {
           {/* Main content */}
           <div className="min-w-0 flex-1">
             <AnimatePresence mode="wait">
-              {/* Processing */}
-              {step === "processing" && (
+              {/* Processing & Verifying */}
+              {(step === "processing" || step === "verifying") && (
                 <motion.div
                   key="processing"
                   variants={fadeVariants}
@@ -285,8 +428,48 @@ function BookingContent() {
                   <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-brand/15 to-brand/5">
                     <Loader2 className="h-8 w-8 animate-spin text-brand" />
                   </div>
-                  <h2 className="type-h3 mb-2">{processingMessage}</h2>
-                  <p className="text-sm text-gray-500">Please don&apos;t close this page</p>
+                  <h2 className="type-h3 mb-2">
+                    {step === "verifying" ? "Verifying Payment..." : processingMessage}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    {step === "verifying"
+                      ? "Please don't close this page. We are confirming your payment."
+                      : "Please don't close this page"}
+                  </p>
+                </motion.div>
+              )}
+
+              {/* Failed */}
+              {step === "failed" && (
+                <motion.div
+                  key="failed"
+                  variants={fadeVariants}
+                  initial="hidden"
+                  animate="show"
+                  exit="exit"
+                  className="flex flex-col items-center rounded-2xl border border-red-200 bg-white p-8 text-center"
+                >
+                  <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-red-50 ring-8 ring-red-50/50">
+                    <AlertCircle className="h-10 w-10 text-red-600" />
+                  </div>
+                  <h2 className="text-xl font-bold tracking-tight text-gray-900">
+                    Verification Pending
+                  </h2>
+                  <p className="mt-2 text-sm text-gray-500">
+                    Payment verification is taking longer than expected or encountered an issue. Your money is safe.
+                  </p>
+                  <div className="mt-4 rounded-xl bg-gray-50 p-4 text-xs text-gray-600 text-left">
+                    Please wait a few minutes and check your appointments dashboard. If your payment was deducted but the appointment isn't confirmed, it will be automatically refunded.
+                  </div>
+                  <div className="mt-6 flex gap-3 w-full max-w-sm">
+                    <Button
+                      variant="outline"
+                      onClick={() => router.push("/patient/appointments")}
+                      className="w-full rounded-xl"
+                    >
+                      View Appointments
+                    </Button>
+                  </div>
                 </motion.div>
               )}
 

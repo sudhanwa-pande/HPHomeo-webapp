@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -23,6 +23,7 @@ import {
   Wallet,
   MapPin,
   Briefcase,
+  AlertCircle,
 } from "lucide-react";
 
 import axios from "axios";
@@ -49,6 +50,16 @@ interface PublicBookingResponse {
   payment_choice: string;
   patient_access_token: string;
   patient_access_expires_at: string;
+}
+
+const VERIFICATION_KEY = "hphomeo:v1:payment_verification";
+
+interface VerificationState {
+  version: number;
+  appointmentId: string;
+  bookingData: PublicBookingResponse;
+  startedAt: number;
+  expiresAt: number;
 }
 
 /* ─── Helpers ─── */
@@ -176,6 +187,7 @@ export default function BookDoctorPage() {
   // Success state
   const [bookingSuccess, setBookingSuccess] = useState<PublicBookingResponse | null>(null);
   const [paymentCompleted, setPaymentCompleted] = useState(false);
+  const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "success" | "failed">("idle");
 
   // Payment hold countdown — set when the payment order is first created.
   // Backend's payment window is fixed from initial booking and does NOT
@@ -193,6 +205,128 @@ export default function BookDoctorPage() {
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [paymentExpiresAt]);
+
+  // Restore verification state from localStorage
+  useEffect(() => {
+    const restoreVerification = async () => {
+      try {
+        const stored = localStorage.getItem(VERIFICATION_KEY);
+        if (!stored) return;
+
+        const parsed: VerificationState = JSON.parse(stored);
+        if (parsed.version !== 1) return;
+
+        if (Date.now() > parsed.expiresAt) {
+          localStorage.removeItem(VERIFICATION_KEY);
+          return;
+        }
+
+        // Fetch immediate status
+        const { data } = await api.get<any>(
+          `/public/appointments/${parsed.appointmentId}`,
+          { _skipAuthRefresh: true } as any
+        );
+
+        const isPaid = data.status === "confirmed" && data.payment_status === "paid";
+        const isFailed = data.payment_status === "failed" || data.payment_status === "refunded" || data.status === "cancelled";
+
+        if (isPaid) {
+          setPaymentCompleted(true);
+          setBookingSuccess(parsed.bookingData);
+          setVerificationStatus("success");
+          localStorage.removeItem(VERIFICATION_KEY);
+          return;
+        }
+
+        if (isFailed) {
+          setBookingSuccess(parsed.bookingData);
+          setVerificationStatus("failed");
+          localStorage.removeItem(VERIFICATION_KEY);
+          return;
+        }
+
+        // Still pending
+        setBookingSuccess(parsed.bookingData);
+        setVerificationStatus("verifying");
+      } catch (err) {
+        // Silently ignore storage parse or immediate fetch errors and wait for polling
+      }
+    };
+    restoreVerification();
+  }, []);
+
+  const attemptsRef = useRef(0);
+  const pollingActiveRef = useRef(false);
+
+  // Polling for webhook eventual consistency
+  useEffect(() => {
+    if (verificationStatus !== "verifying" || !bookingSuccess) {
+      pollingActiveRef.current = false;
+      return;
+    }
+
+    if (pollingActiveRef.current) return;
+    pollingActiveRef.current = true;
+
+    attemptsRef.current = 0;
+    const maxAttempts = 6; // 18 seconds max
+    let timeoutId: NodeJS.Timeout;
+    const abortController = new AbortController();
+
+    const checkStatus = async () => {
+      attemptsRef.current++;
+      try {
+        console.log(`Polling appointment status (attempt ${attemptsRef.current}/${maxAttempts})...`);
+        const { data } = await api.get<any>(
+          `/public/appointments/${bookingSuccess.appointment_id}`,
+          { 
+            signal: abortController.signal,
+            _skipAuthRefresh: true 
+          } as any
+        );
+
+        const isPaid = data.status === "confirmed" && data.payment_status === "paid";
+        const isFailed = data.payment_status === "failed" || data.payment_status === "refunded" || data.status === "cancelled";
+
+        if (isPaid) {
+          console.log("Payment verified successfully on backend.");
+          setPaymentCompleted(true);
+          setVerificationStatus("success");
+          localStorage.removeItem(VERIFICATION_KEY);
+          pollingActiveRef.current = false;
+          return;
+        }
+
+        if (isFailed) {
+          console.error("Payment failed or cancelled during verification.");
+          setVerificationStatus("failed");
+          localStorage.removeItem(VERIFICATION_KEY);
+          pollingActiveRef.current = false;
+          return;
+        }
+      } catch (err: any) {
+        if (err.name === "CanceledError" || err.message === "canceled") return;
+        console.error("Error polling appointment status:", err);
+      }
+
+      if (attemptsRef.current >= maxAttempts) {
+        console.error("Payment verification timed out.");
+        setVerificationStatus("failed");
+        localStorage.removeItem(VERIFICATION_KEY);
+        pollingActiveRef.current = false;
+      } else {
+        timeoutId = setTimeout(checkStatus, 3000);
+      }
+    };
+
+    checkStatus();
+
+    return () => {
+      clearTimeout(timeoutId);
+      abortController.abort();
+      pollingActiveRef.current = false;
+    };
+  }, [verificationStatus, bookingSuccess]);
 
   /* ─── Queries ─── */
 
@@ -295,6 +429,7 @@ export default function BookDoctorPage() {
     onSuccess: async (data) => {
       if (data.status === "pending_payment" && data.payment_choice === "pay_now") {
         try {
+          console.log("Payment initiated. Creating order...");
           const { data: orderData } = await api.post<{
             message: string;
             order_id: string;
@@ -309,6 +444,7 @@ export default function BookDoctorPage() {
           if (orderData.message === "already_paid" || !orderData.order_id) {
             setPaymentCompleted(true);
             setBookingSuccess(data);
+            setVerificationStatus("success");
             return;
           }
 
@@ -319,6 +455,7 @@ export default function BookDoctorPage() {
           }
 
           const { openRazorpayCheckout } = await import("@/lib/razorpay");
+          console.log("Razorpay checkout opened for booking.");
           await openRazorpayCheckout({
             keyId: orderData.key_id,
             orderId: orderData.order_id,
@@ -329,16 +466,29 @@ export default function BookDoctorPage() {
             patientPhone: patientPhone.trim(),
             description: `Consultation with ${doctor?.full_name || "Doctor"}`,
             onSuccess: () => {
-              setPaymentCompleted(true);
+              console.log("Payment success callback received from Razorpay.");
+              setBookingSuccess(data);
+              setVerificationStatus("verifying");
+              localStorage.setItem(VERIFICATION_KEY, JSON.stringify({
+                version: 1,
+                appointmentId: data.appointment_id,
+                bookingData: data,
+                startedAt: Date.now(),
+                expiresAt: Date.now() + 5 * 60 * 1000
+              }));
+            },
+            onDismiss: () => {
+              console.log("Razorpay checkout dismissed.");
               setBookingSuccess(data);
             },
-            onDismiss: () => setBookingSuccess(data),
           });
-        } catch {
+        } catch (err) {
+          console.error("Error starting payment:", err);
           setBookingSuccess(data);
         }
       } else {
         setBookingSuccess(data);
+        if (data.status === "confirmed") setVerificationStatus("success");
       }
     },
   });
@@ -353,6 +503,7 @@ export default function BookDoctorPage() {
     mutationFn: async () => {
       if (!bookingSuccess) throw new Error("No appointment to retry");
 
+      console.log("Retrying payment initiated. Creating order...");
       const { data: orderData } = await api.post<{
         message: string;
         order_id: string;
@@ -366,6 +517,7 @@ export default function BookDoctorPage() {
 
       if (orderData.message === "already_paid" || !orderData.order_id) {
         setPaymentCompleted(true);
+        setVerificationStatus("success");
         return;
       }
 
@@ -377,6 +529,7 @@ export default function BookDoctorPage() {
       }
 
       const { openRazorpayCheckout } = await import("@/lib/razorpay");
+      console.log("Razorpay checkout opened for payment retry.");
       await openRazorpayCheckout({
         keyId: orderData.key_id,
         orderId: orderData.order_id,
@@ -386,7 +539,22 @@ export default function BookDoctorPage() {
         patientEmail: patientEmail.trim() || undefined,
         patientPhone: patientPhone.trim(),
         description: `Consultation with ${doctor?.full_name || "Doctor"}`,
-        onSuccess: () => setPaymentCompleted(true),
+        onSuccess: () => {
+          console.log("Payment success callback received from Razorpay during retry.");
+          setVerificationStatus("verifying");
+          if (bookingSuccess) {
+            localStorage.setItem(VERIFICATION_KEY, JSON.stringify({
+              version: 1,
+              appointmentId: bookingSuccess.appointment_id,
+              bookingData: bookingSuccess,
+              startedAt: Date.now(),
+              expiresAt: Date.now() + 5 * 60 * 1000
+            }));
+          }
+        },
+        onDismiss: () => {
+          console.log("Razorpay checkout dismissed during retry.");
+        },
       });
     },
     onError: (error) => {
@@ -455,6 +623,79 @@ export default function BookDoctorPage() {
 
   // Success screen
   if (bookingSuccess) {
+    if (verificationStatus === "verifying") {
+      return (
+        <div className="min-h-screen bg-brand-bg">
+          <Navbar />
+          <main className="container-main flex items-center justify-center py-16 px-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="w-full max-w-md rounded-2xl border border-gray-200/60 bg-white p-8 text-center shadow-sm"
+            >
+              <Loader2 className="mx-auto mb-4 h-12 w-12 animate-spin text-brand" />
+              <h2 className="text-xl font-bold tracking-tight text-gray-900">
+                Verifying Payment...
+              </h2>
+              <p className="mt-2 text-sm text-gray-500">
+                Please don't close or refresh this window. We are confirming your payment with the gateway.
+              </p>
+            </motion.div>
+          </main>
+        </div>
+      );
+    }
+
+    if (verificationStatus === "failed") {
+      return (
+        <div className="min-h-screen bg-brand-bg">
+          <Navbar />
+          <main className="container-main flex items-center justify-center py-16 px-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm"
+            >
+              <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-red-50 ring-8 ring-red-50/50">
+                <AlertCircle className="h-10 w-10 text-red-600" />
+              </div>
+              <h2 className="text-xl font-bold tracking-tight text-gray-900">
+                Verification Pending
+              </h2>
+              <p className="mt-2 text-sm text-gray-500">
+                Payment verification is taking longer than expected or encountered an issue. Your money is safe.
+              </p>
+              <div className="mt-4 rounded-xl bg-gray-50 p-4 text-xs text-gray-600 text-left">
+                Please wait a few minutes and check your appointments dashboard. If your payment was deducted but the appointment isn't confirmed, it will be automatically refunded.
+              </div>
+              <div className="mt-6 flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => router.push("/")}
+                  className="w-full rounded-xl"
+                >
+                  Go Home
+                </Button>
+                <Button
+                  onClick={() => retryPaymentMutation.mutate()}
+                  disabled={retryPaymentMutation.isPending}
+                  className="w-full rounded-xl bg-brand hover:bg-brand/90"
+                >
+                  {retryPaymentMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Try Again"
+                  )}
+                </Button>
+              </div>
+            </motion.div>
+          </main>
+        </div>
+      );
+    }
+
     const isPaid = paymentCompleted || bookingSuccess.status === "confirmed";
     const isPayLater = !isPaid && bookingSuccess.payment_choice === "pay_at_clinic";
     const isPaymentPending = !isPaid && !isPayLater;
