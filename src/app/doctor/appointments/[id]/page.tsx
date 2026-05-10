@@ -758,7 +758,7 @@ function DetailContent() {
               )}
               {isFinalized && (
                 <Button
-                  variant="outline"
+                  variant="brand"
                   className="w-full rounded-xl sm:w-auto"
                   onClick={() => {
                     fetchAndOpenPdf(`/doctor/appointments/${appointmentId}/prescription/pdf/view`);

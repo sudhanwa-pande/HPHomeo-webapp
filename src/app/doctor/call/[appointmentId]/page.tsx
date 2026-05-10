@@ -718,7 +718,8 @@ const PreJoinCard = forwardRef<PreJoinHandle, PreJoinCardProps>(function PreJoin
             {/* Actions */}
             <div className="mt-6 grid gap-2.5">
               <Button
-                className="h-12 w-full rounded-2xl bg-brand text-sm font-semibold text-white hover:bg-brand/90"
+                variant="brand"
+                className="h-12 w-full rounded-2xl text-sm font-semibold"
                 loading={joining}
                 onClick={onJoin}
               >
