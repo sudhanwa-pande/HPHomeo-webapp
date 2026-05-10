@@ -662,7 +662,7 @@ function DetailContent() {
 
       <div className="space-y-0">
         {/* ─── Back button + compact header ────────────────────── */}
-        <div className="sticky top-0 z-30 -mx-1 rounded-b-2xl bg-white/90 px-1 py-3 backdrop-blur-md sm:py-4">
+        <div className="sticky top-[calc(64px-1px)] z-30 -mx-4 border-b border-border/10 bg-white/80 px-4 py-3 backdrop-blur-lg sm:-mx-5 sm:px-5 sm:py-4 lg:-mx-6 lg:px-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             {/* Row 1: Back + avatar + name + badges */}
             <div className="flex min-w-0 items-center gap-2 sm:gap-4">
@@ -835,16 +835,16 @@ function DetailContent() {
                       setActiveStep(step.key);
                     }}
                     className={cn(
-                      "flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-xl px-4 py-2.5 text-xs font-medium transition-all",
+                      "flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-[11px] font-medium transition-all",
                       isActive
                         ? "bg-brand/10 text-brand shadow-sm"
                         : "text-brand-subtext active:bg-brand-bg",
                     )}
                   >
                     {state === "completed" && !isActive ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      <Check className="h-3 w-3 text-emerald-500" />
                     ) : (
-                      <Icon className="h-3.5 w-3.5" />
+                      <Icon className="h-3 w-3" />
                     )}
                     {step.label}
                   </button>
@@ -974,7 +974,7 @@ function SectionShell({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-border/60 bg-white p-3 shadow-[0_4px_20px_rgba(15,23,42,0.03)] sm:p-5">
+    <section className="rounded-2xl border border-border/60 bg-white p-3.5 shadow-[0_4px_20px_rgba(15,23,42,0.03)] sm:p-6">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2 sm:mb-4 sm:gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold text-brand-dark">{title}</h3>
@@ -1992,7 +1992,7 @@ function CompleteSection({
           </div>
 
           {/* Completion card */}
-          <div className="mt-6 rounded-2xl border border-border/60 bg-gradient-to-br from-emerald-50/50 to-white p-6">
+          <div className="mt-6 rounded-2xl border border-border/60 bg-gradient-to-br from-emerald-50/50 to-white p-4 sm:p-6">
             <div className="flex items-start gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-100">
                 <Sparkles className="h-6 w-6 text-emerald-600" />
@@ -2007,7 +2007,7 @@ function CompleteSection({
                   their follow-up eligibility.
                 </p>
                 <Button
-                  className="mt-4 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+                  className="mt-4 w-full rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
                   disabled={!canComplete}
                   loading={completePending}
                   onClick={onComplete}
@@ -2039,7 +2039,7 @@ function ChecklistItem({
   hint?: string;
 }) {
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-start gap-2.5">
       <div
         className={cn(
           "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
