@@ -776,7 +776,7 @@ function DetailContent() {
         </div>
 
         {/* ─── Main layout: sidebar stepper + content ──────────── */}
-        <div className="mt-4 flex gap-4 sm:mt-6 sm:gap-6">
+        <div className="mt-4 flex flex-col gap-4 lg:flex-row sm:mt-6 sm:gap-6">
           {/* Vertical stepper sidebar */}
           <div className="hidden w-56 shrink-0 lg:block">
             <nav className="sticky top-24 space-y-1">
@@ -1371,7 +1371,7 @@ function PrescriptionSection({
     <div className="space-y-5">
       {/* Toolbar — mobile: stacked grid; desktop: inline flex */}
       <div className="rounded-2xl border border-border/60 bg-white p-2 sm:p-3">
-        <div className="grid grid-cols-[1fr_auto] items-center gap-2 sm:flex sm:flex-wrap sm:justify-between sm:gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           {/* Left group: Templates + Preview */}
           <div className="flex items-center gap-1.5 sm:gap-2">
             <TemplateDropdown
@@ -1393,20 +1393,22 @@ function PrescriptionSection({
           </div>
 
           {/* Right group: auto-save status + Finalize */}
-          <div className="flex items-center justify-end gap-1.5 sm:gap-2">
-            {autoSaveStatus === "saving" && (
-              <span className="hidden items-center gap-1 text-xs text-brand-subtext sm:flex">
-                <Loader2 className="h-3 w-3 animate-spin" /> Saving...
-              </span>
-            )}
-            {autoSaveStatus === "saved" && (
-              <span className="hidden items-center gap-1 text-xs text-emerald-600 sm:flex">
-                <Check className="h-3 w-3" /> Draft saved
-              </span>
-            )}
-            {hasUnsavedChanges && autoSaveStatus === "idle" && (
-              <span className="hidden text-xs text-amber-600 sm:inline">Unsaved</span>
-            )}
+          <div className="flex items-center justify-between gap-1.5 sm:justify-end sm:gap-2">
+            <div className="flex items-center gap-2">
+              {autoSaveStatus === "saving" && (
+                <span className="hidden items-center gap-1 text-xs text-brand-subtext sm:flex">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Saving...
+                </span>
+              )}
+              {autoSaveStatus === "saved" && (
+                <span className="hidden items-center gap-1 text-xs text-emerald-600 sm:flex">
+                  <Check className="h-3 w-3" /> Draft saved
+                </span>
+              )}
+              {hasUnsavedChanges && autoSaveStatus === "idle" && (
+                <span className="hidden text-xs text-amber-600 sm:inline">Unsaved</span>
+              )}
+            </div>
 
             <Button
               size="sm"
@@ -1454,7 +1456,7 @@ function PrescriptionSection({
             title="Patient Details"
             description="Auto-filled from appointment"
           >
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+            <div className="grid grid-cols-1 gap-4 xs:grid-cols-2 sm:grid-cols-3 xl:grid-cols-5">
               <InfoLabel label="Name" value={appointment.patient.full_name} />
               <InfoLabel
                 label="Age"
