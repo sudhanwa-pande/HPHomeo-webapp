@@ -34,6 +34,7 @@ import { Navbar } from "@/components/layout/navbar";
 import { Skeleton } from "@/components/loading";
 import { Button } from "@/components/ui/button";
 import type { PublicDoctor } from "@/types/patient";
+import { cn } from "@/lib/utils";
 
 /* ─── Types ─── */
 
