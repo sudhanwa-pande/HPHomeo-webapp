@@ -49,7 +49,15 @@ function PatientCallContent() {
   const queryClient = useQueryClient();
   const appointmentId = params.appointmentId;
   const joinInFlightRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
   const autoResumeAttemptedRef = useRef(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const resumeStorageKey = `ehomeo:patient-auth-call:${appointmentId}`;
   const resumeAttemptStorageKey = `${resumeStorageKey}:resume-lock`;
 
@@ -145,6 +153,15 @@ function PatientCallContent() {
     },
   });
 
+  // Polling fallback to detect status drift if SSE drops
+  useEffect(() => {
+    if (!tokenData) return;
+    const interval = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["patient", "appointment", appointmentId, "call"] });
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [appointmentId, tokenData, queryClient]);
+
   const joinCall = useCallback(
     async (options?: Partial<MediaPreferences> & { facingMode?: CameraFacingMode }) => {
       if (joinInFlightRef.current) return;
@@ -176,7 +193,9 @@ function PatientCallContent() {
           `/patient/appointments/${appointmentId}/video-token`,
           {},
         );
-        setTokenData(data);
+        if (isMountedRef.current) {
+          setTokenData(data);
+        }
         // callStartedAt is set via onConnected when the room actually connects.
       } catch (error) {
         const apiMessage = getApiError(error);
@@ -207,11 +226,39 @@ function PatientCallContent() {
       } finally {
         joinInFlightRef.current = false;
         clearResumeAttemptLock();
-        setJoining(false);
+        if (isMountedRef.current) {
+          setJoining(false);
+        }
       }
     },
     [appointment, appointmentId, clearResumeAttemptLock, joinWindow, mediaPreferences.audio, mediaPreferences.video, persistResumeState, preferredFacingMode],
   );
+
+  const tokenRefresher = useCallback(async () => {
+    if (refreshInFlightRef.current) return "";
+    refreshInFlightRef.current = true;
+    try {
+      const { data } = await api.post<VideoTokenResponse>(
+        `/patient/appointments/${appointmentId}/video-token`,
+        {},
+      );
+      return data.token;
+    } finally {
+      if (isMountedRef.current) {
+        refreshInFlightRef.current = false;
+      }
+    }
+  }, [appointmentId]);
+
+  // Disconnect room if appointment status becomes "ended" (via SSE/polling)
+  useEffect(() => {
+    if (appointment?.call_status === "ended" && tokenData) {
+      setTokenData(null);
+      setCallStartedAt(null);
+      clearResumeState();
+      setJoinError("The consultation has ended.");
+    }
+  }, [appointment?.call_status, tokenData, clearResumeState]);
 
   const handleMediaDeviceFailure = useCallback((_failure?: unknown, kind?: string) => {
     const message = kind === "audioinput"
@@ -221,14 +268,27 @@ function PatientCallContent() {
     notifyError("Media access issue", message);
   }, []);
 
-  const handleDisconnect = useCallback(() => {
-    setJoinError("Connection dropped. Rejoin the consultation to continue.");
-    setTokenData(null);
-    clearResumeAttemptLock();
+  const handleDisconnect = useCallback((reason?: unknown) => {
+    console.log("Disconnected:", reason);
+    
+    // Convert to string for easy comparison
+    const reasonStr = String(reason);
+    
+    // Ignore transient network issues and let LiveKit's internal auto-reconnect handle it
+    if (reasonStr === "network" || reasonStr === "CLIENT_INITIATED_RECONNECT" || reasonStr === "signal_connection_disconnected") {
+      return;
+    }
+
+    // Only kill the UI for unrecoverable errors (or explicit leaves handled elsewhere)
+    if (["server_shutdown", "room_deleted", "user_rejected", "leave", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
+        setJoinError("Connection dropped. Rejoin the consultation to continue.");
+        setTokenData(null);
+        clearResumeAttemptLock();
+    }
   }, [clearResumeAttemptLock]);
 
   const canJoin = Boolean(
-    appointment && appointment.mode === "online" && appointment.video_enabled && appointment.status === "confirmed",
+    appointment && appointment.mode === "online" && appointment.video_enabled && appointment.status === "confirmed" && appointment.call_status !== "ended",
   );
   const canAttemptJoinNow = Boolean(canJoin && !joinWindow?.tooEarly);
 
@@ -375,14 +435,7 @@ function PatientCallContent() {
         remoteWaitingDescription="Stay on this screen. The doctor will appear as soon as they join."
         onLeave={() => { clearResumeState(); router.push(`/patient/appointments/${appointmentId}`); }}
         onConnected={() => setCallStartedAt(Date.now())}
-        tokenRefresher={async () => {
-          const { data } = await api.post<VideoTokenResponse>(
-            `/patient/appointments/${appointmentId}/video-token`,
-            {},
-          );
-          setTokenData(data);
-          return data.token;
-        }}
+        tokenRefresher={tokenRefresher}
         endLabel="Leave call"
         infoLabel="Appointment details"
         infoContent={

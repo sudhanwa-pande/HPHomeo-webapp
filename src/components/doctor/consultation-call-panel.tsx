@@ -38,6 +38,7 @@ import {
   LIVEKIT_ROOM_OPTIONS,
   prepareMediaChoices,
 } from "@/lib/media";
+import { hapticPulse, hapticSuccess, hapticTap, hapticWarning } from "@/lib/haptics";
 import { notifyApiError, notifyError, notifyInfo, notifySuccess } from "@/lib/notify";
 import { playIncomingMessageSound } from "@/lib/sound";
 import { cn } from "@/lib/utils";
@@ -68,14 +69,17 @@ function formatConnectionLabel(connectionState: ConnectionState, remoteCount: nu
 
 const PIP_WIDTH_SM = 320; // matches sm:w-[320px]
 const PIP_MARGIN = 16;    // gap from viewport edge
+const PIP_MARGIN_BOTTOM_MOBILE = 80; // bottom-20 equivalent — avoids gesture areas on mobile
 
 function getDefaultPos(el?: HTMLDivElement | null): { x: number; y: number } {
   if (typeof window === "undefined") return { x: 0, y: 0 };
   const elW = el?.offsetWidth ?? PIP_WIDTH_SM;
   const elH = el?.offsetHeight ?? 252;
+  // On narrow screens, position higher to avoid bottom nav / gesture conflicts
+  const bottomMargin = window.innerWidth < 640 ? PIP_MARGIN_BOTTOM_MOBILE : PIP_MARGIN;
   return {
-    x: window.innerWidth - elW - PIP_MARGIN,
-    y: window.innerHeight - elH - PIP_MARGIN,
+    x: Math.max(PIP_MARGIN, window.innerWidth - elW - PIP_MARGIN),
+    y: Math.max(PIP_MARGIN, window.innerHeight - elH - bottomMargin),
   };
 }
 
@@ -214,6 +218,7 @@ export function ConsultationCallPanel({
       const { data } = await api.post<VideoTokenResponse>(
         `/doctor/appointments/${appointmentId}/video-token`,
       );
+      hapticSuccess();
       setCallEnded(false);
       setTokenData(data);
     } catch (error) {
@@ -237,6 +242,7 @@ export function ConsultationCallPanel({
       await api.post(`/doctor/appointments/${appointmentId}/call/end`);
     },
     onSuccess: async () => {
+      hapticPulse();
       notifySuccess("Call ended", "The consultation session has been closed.");
       setCallEnded(true);
       setTokenData(null);
@@ -292,7 +298,7 @@ export function ConsultationCallPanel({
           "overflow-hidden rounded-2xl",
           minimized
             ? cn(
-                "fixed z-50 w-[280px] border bg-[#111113] sm:w-[320px]",
+                "fixed z-50 w-[240px] border bg-[#111113] sm:w-[320px]",
                 // Elevated shadow + ring during drag for visual feedback
                 isDragging
                   ? "cursor-grabbing border-white/20 shadow-[0_24px_64px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.08)]"
@@ -478,7 +484,7 @@ export function ConsultationCallPanel({
 
         <div className="mt-4 grid gap-2">
           <Button
-            className="h-11 rounded-xl bg-brand text-sm font-semibold text-white hover:bg-brand/90"
+            className="h-12 rounded-xl bg-brand text-sm font-semibold text-white hover:bg-brand/90"
             loading={joining}
             onClick={() => void joinCall()}
           >
@@ -487,7 +493,7 @@ export function ConsultationCallPanel({
           </Button>
           <Button
             variant="outline"
-            className="h-10 rounded-xl border-white/[0.08] bg-transparent text-sm text-white/60 hover:bg-white/[0.06] hover:text-white"
+            className="h-11 rounded-xl border-white/[0.08] bg-transparent text-sm text-white/60 hover:bg-white/[0.06] hover:text-white"
             disabled={joining}
             onClick={() => void joinCall({ audio: false, video: false })}
           >
@@ -529,6 +535,7 @@ function CallRoomContent({
   const [message, setMessage] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
   const chatBootstrappedRef = useRef(false);
   const chatMessageCountRef = useRef(0);
 
@@ -578,6 +585,7 @@ function CallRoomContent({
   }, [chatMessages, chatOpen]);
 
   const toggleMic = async () => {
+    hapticTap();
     try {
       await localParticipant.setMicrophoneEnabled(
         !isMicrophoneEnabled,
@@ -589,6 +597,7 @@ function CallRoomContent({
   };
 
   const toggleCamera = async () => {
+    hapticTap();
     try {
       await localParticipant.setCameraEnabled(!isCameraEnabled);
     } catch (error) {
@@ -607,8 +616,15 @@ function CallRoomContent({
   if (minimized) {
     return (
       <div>
-        {/* Video area — not draggable, pointer-events normal for video */}
-        <div className="relative aspect-video bg-[#111113]">
+        {/* Video area — tappable to expand to full consultation view */}
+        <div
+          className="relative aspect-video cursor-pointer bg-[#111113]"
+          role="button"
+          tabIndex={0}
+          onClick={() => { if (onMaximize) onMaximize(); }}
+          onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && onMaximize) { e.preventDefault(); onMaximize(); } }}
+          title="Tap to expand"
+        >
           {remoteVideoTrack ? (
             <VideoTrack trackRef={remoteVideoTrack} className="h-full w-full object-contain" />
           ) : (
@@ -666,14 +682,15 @@ function CallRoomContent({
               )}
             </button>
 
-            {/* End call */}
+            {/* End call with confirm */}
             <button
               type="button"
               className="flex h-8 items-center gap-1.5 rounded-full bg-red-500 px-3 text-[11px] font-semibold text-white transition-colors hover:bg-red-400 disabled:opacity-60"
               disabled={endLoading}
               onClick={(e) => {
                 e.stopPropagation();
-                onEnd();
+                hapticWarning();
+                setEndConfirmOpen(true);
               }}
             >
               <PhoneOff className="h-3 w-3" />
@@ -697,6 +714,35 @@ function CallRoomContent({
           )}
         </div>
 
+        {/* End call confirmation overlay (minimized) */}
+        {endConfirmOpen && (
+          <div className="flex flex-col items-center gap-2 bg-[#1a1a1d] px-3 py-3">
+            <p className="text-[11px] font-medium text-white/60">End this call?</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white/70 transition hover:bg-white/20"
+                onClick={(e) => { e.stopPropagation(); setEndConfirmOpen(false); }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-full bg-red-500 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-red-400 disabled:opacity-60"
+                disabled={endLoading}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  hapticPulse();
+                  setEndConfirmOpen(false);
+                  onEnd();
+                }}
+              >
+                End call
+              </button>
+            </div>
+          </div>
+        )}
+
         <RoomAudioRenderer />
       </div>
     );
@@ -707,7 +753,7 @@ function CallRoomContent({
     <div>
       {/* Video area */}
       <div className="relative bg-[#111113]">
-        <div className="relative h-[400px] sm:h-[460px] xl:h-[520px]">
+        <div className="relative h-[220px] sm:h-[400px] xl:h-[520px]">
           {remoteVideoTrack ? (
             <VideoTrack trackRef={remoteVideoTrack} className="h-full w-full object-contain" />
           ) : (
@@ -782,7 +828,7 @@ function CallRoomContent({
         </div>
 
         {/* Controls */}
-        <div className="flex items-center justify-center gap-3 px-4 py-3">
+        <div className="flex items-center justify-center gap-2 px-3 py-2.5 backdrop-blur-sm sm:gap-3 sm:px-4 sm:py-3">
           <button
             type="button"
             onClick={() => void toggleMic()}
@@ -842,12 +888,41 @@ function CallRoomContent({
             type="button"
             className="flex h-10 items-center gap-2 rounded-full bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400 disabled:opacity-60"
             disabled={endLoading}
-            onClick={onEnd}
+            onClick={() => {
+              hapticWarning();
+              setEndConfirmOpen(true);
+            }}
           >
             <PhoneOff className="h-4 w-4" />
             <span className="hidden sm:inline">{endLabel}</span>
           </button>
         </div>
+
+        {/* End call confirmation bar */}
+        {endConfirmOpen && (
+          <div className="flex items-center justify-center gap-3 border-t border-white/[0.06] bg-[#1a1a1d] px-4 py-3">
+            <p className="text-xs font-medium text-white/60">End this consultation?</p>
+            <button
+              type="button"
+              className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/20"
+              onClick={() => setEndConfirmOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded-full bg-red-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-400 disabled:opacity-60"
+              disabled={endLoading}
+              onClick={() => {
+                hapticPulse();
+                setEndConfirmOpen(false);
+                onEnd();
+              }}
+            >
+              Yes, end call
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Chat */}

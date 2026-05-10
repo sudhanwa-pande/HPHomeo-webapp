@@ -517,12 +517,12 @@ function AppointmentsContent() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="group relative overflow-hidden rounded-2xl border border-brand/20 bg-gradient-to-r from-brand/5 via-white to-brand/5 p-5"
+            className="group relative overflow-hidden rounded-2xl border border-brand/20 bg-gradient-to-r from-brand/5 via-white to-brand/5 p-4 sm:p-5"
           >
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(88,155,255,0.08),transparent_50%)]" />
-            <div className="relative flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand/10 text-sm font-bold text-brand">
+            <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand/10 text-sm font-bold text-brand sm:flex">
                   {upNext.patient.full_name
                     ?.split(" ")
                     .slice(0, 2)
@@ -530,7 +530,7 @@ function AppointmentsContent() {
                     .join("")
                     .toUpperCase() || "P"}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand">
                       Up Next
@@ -539,7 +539,7 @@ function AppointmentsContent() {
                       {format(parseISO(upNext.scheduled_at), "hh:mm a")}
                     </span>
                   </div>
-                  <p className="mt-1 text-base font-semibold text-brand-dark">
+                  <p className="mt-1 truncate text-base font-semibold text-brand-dark">
                     {upNext.patient.full_name}
                   </p>
                   <div className="mt-0.5 flex items-center gap-2 text-xs text-brand-subtext">
@@ -558,10 +558,10 @@ function AppointmentsContent() {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2">
                 {upNext.call_status === "waiting" && (
                   <Button
-                    className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+                    className="w-full rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
                     onClick={() => router.push(`/doctor/call/${upNext.appointment_id}`)}
                   >
                     <Phone className="h-4 w-4" />
@@ -570,7 +570,7 @@ function AppointmentsContent() {
                 )}
                 <Button
                   variant="outline"
-                  className="rounded-xl"
+                  className="w-full rounded-xl sm:w-auto"
                   onClick={() => openDetail(upNext.appointment_id)}
                 >
                   Open

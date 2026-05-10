@@ -58,6 +58,14 @@ function CallRoomContent() {
   const queryClient = useQueryClient();
   const autoResumeAttemptedRef = useRef(false);
   const joinInFlightRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   // Lets us imperatively release the pre-join preview's MediaStream tracks
   // immediately before mounting <LiveKitRoom> — see PreJoinHandle docstring.
   const preJoinRef = useRef<PreJoinHandle>(null);
@@ -150,13 +158,24 @@ function CallRoomContent() {
     },
     [],
   );
-  const handleDisconnected = useCallback(() => {
+  const handleDisconnected = useCallback((reason?: unknown) => {
     // Ignore disconnects that are part of the normal end-call flow
     if (callEnded) return;
-    setJoinError("Connection dropped. Rejoin the consultation to continue.");
-    setTokenData(null);
-    setCallStartedAt(null);
-    clearResumeAttemptLock();
+
+    console.log("Disconnected:", reason);
+    const reasonStr = String(reason);
+
+    // Ignore transient network issues and let LiveKit's internal auto-reconnect handle it
+    if (reasonStr === "network" || reasonStr === "CLIENT_INITIATED_RECONNECT" || reasonStr === "signal_connection_disconnected") {
+      return;
+    }
+
+    if (["server_shutdown", "room_deleted", "user_rejected", "leave", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
+        setJoinError("Connection dropped. Rejoin the consultation to continue.");
+        setTokenData(null);
+        setCallStartedAt(null);
+        clearResumeAttemptLock();
+    }
   }, [callEnded, clearResumeAttemptLock]);
 
   const { data: appointment, isLoading: appointmentLoading } = useQuery({
@@ -166,6 +185,15 @@ function CallRoomContent() {
       return data;
     },
   });
+
+  // Polling fallback to detect status drift
+  useEffect(() => {
+    if (!tokenData) return;
+    const interval = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail", appointmentId] });
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [appointmentId, tokenData, queryClient]);
 
   const joinCall = useCallback(
     async (options?: Partial<MediaPreferences>) => {
@@ -205,7 +233,10 @@ function CallRoomContent() {
         // latency so LiveKit's getUserMedia doesn't see a still-locked device.
         preJoinRef.current?.releasePreview();
         await new Promise((resolve) => setTimeout(resolve, 200));
-        setTokenData(data);
+        
+        if (isMountedRef.current) {
+          setTokenData(data);
+        }
         // callStartedAt is set via onConnected when the room actually connects,
         // not here — avoids counting ICE/DTLS negotiation time in the call timer.
       } catch (error) {
@@ -220,7 +251,9 @@ function CallRoomContent() {
       } finally {
         joinInFlightRef.current = false;
         clearResumeAttemptLock();
-        setJoining(false);
+        if (isMountedRef.current) {
+          setJoining(false);
+        }
       }
     },
     [
@@ -231,6 +264,29 @@ function CallRoomContent() {
       persistResumeState,
     ],
   );
+
+  const tokenRefresher = useCallback(async () => {
+    if (refreshInFlightRef.current) return "";
+    refreshInFlightRef.current = true;
+    try {
+      const { data } = await api.post<VideoTokenResponse>(`/doctor/appointments/${appointmentId}/video-token`);
+      return data.token;
+    } finally {
+      if (isMountedRef.current) {
+        refreshInFlightRef.current = false;
+      }
+    }
+  }, [appointmentId]);
+
+  // Disconnect room if appointment status becomes "ended" (via SSE/polling)
+  useEffect(() => {
+    if (appointment?.call_status === "ended" && tokenData) {
+      setCallEnded(true);
+      setTokenData(null);
+      setCallStartedAt(null);
+      clearResumeState();
+    }
+  }, [appointment?.call_status, tokenData, clearResumeState]);
 
   const endCallMutation = useMutation({
     mutationFn: async () => {
@@ -446,11 +502,7 @@ function CallRoomContent() {
         onBack={() => router.push("/doctor/appointments")}
         onLeave={() => endCallMutation.mutate()}
         onConnected={() => setCallStartedAt(Date.now())}
-        tokenRefresher={async () => {
-          const { data } = await api.post<VideoTokenResponse>(`/doctor/appointments/${appointmentId}/video-token`);
-          setTokenData(data);
-          return data.token;
-        }}
+        tokenRefresher={tokenRefresher}
         endLoading={endCallMutation.isPending}
         endLabel="End consultation"
         allowScreenShare
@@ -548,12 +600,12 @@ const PreJoinCard = forwardRef<PreJoinHandle, PreJoinCardProps>(function PreJoin
   }, [mediaPreferences.video]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#111113] px-4 py-6">
+    <div className="flex min-h-screen items-center justify-center bg-[#111113] px-3 py-4 pb-[env(safe-area-inset-bottom)] sm:px-4 sm:py-6">
       <div className="w-full max-w-5xl text-white">
-        <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="grid gap-4 sm:gap-5 lg:grid-cols-[1.1fr_0.9fr]">
           {/* ── Left: Live preview ── */}
           <section className="relative overflow-hidden rounded-3xl bg-[#1a1a1f]">
-            <div className="relative aspect-[4/3] w-full lg:aspect-auto lg:h-full lg:min-h-[480px]">
+            <div className="relative aspect-[16/10] w-full sm:aspect-[4/3] lg:aspect-auto lg:h-full lg:min-h-[480px]">
               {mediaPreferences.video ? (
                 <video
                   ref={videoRef}
@@ -606,12 +658,12 @@ const PreJoinCard = forwardRef<PreJoinHandle, PreJoinCardProps>(function PreJoin
           </section>
 
           {/* ── Right: Setup panel ── */}
-          <section className="rounded-3xl border border-white/[0.06] bg-[#161618] p-6 sm:p-7">
+          <section className="rounded-2xl border border-white/[0.06] bg-[#161618] p-4 sm:rounded-3xl sm:p-6 md:p-7">
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/30">Doctor setup</p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+            <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
               Join consultation
             </h1>
-            <p className="mt-2 text-sm leading-relaxed text-white/45">
+            <p className="mt-1.5 text-sm leading-relaxed text-white/45 sm:mt-2">
               Check your mic and camera, then enter the room.
             </p>
 
@@ -675,7 +727,7 @@ const PreJoinCard = forwardRef<PreJoinHandle, PreJoinCardProps>(function PreJoin
               </Button>
               <Button
                 variant="outline"
-                className="h-11 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
+                className="h-12 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white sm:h-11"
                 disabled={joining}
                 onClick={onJoinWithoutMedia}
               >

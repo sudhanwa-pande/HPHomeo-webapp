@@ -80,6 +80,14 @@ function WaitingRoomContent() {
   const [preferredFacingMode, setPreferredFacingMode] =
     useState<CameraFacingMode>("user");
   const joinInFlightRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Notify backend when patient explicitly leaves
   const handleLeave = useCallback(() => {
@@ -223,11 +231,29 @@ function WaitingRoomContent() {
         }
       } finally {
         joinInFlightRef.current = false;
-        setJoining(false);
+        if (isMountedRef.current) {
+          setJoining(false);
+        }
       }
     },
     [appointmentId, mediaPreferences.audio, mediaPreferences.video, preferredFacingMode, tokenData],
   );
+
+  const tokenRefresher = useCallback(async () => {
+    if (refreshInFlightRef.current) return "";
+    refreshInFlightRef.current = true;
+    try {
+      const { data } = await api.post<VideoTokenResponse>(
+        `/patient/appointments/${appointmentId}/video-token`,
+        {},
+      );
+      return data.token;
+    } finally {
+      if (isMountedRef.current) {
+        refreshInFlightRef.current = false;
+      }
+    }
+  }, [appointmentId]);
 
   // Auto-connect to LiveKit once media check passes
   const autoConnectRef = useRef(false);
@@ -260,7 +286,7 @@ function WaitingRoomContent() {
   if (tokenData && apt) {
     return (
       <LiveKitRoom
-        key={`${appointmentId}:${tokenData.token}`}
+        key={appointmentId}
         serverUrl={tokenData.server_url}
         token={tokenData.token}
         connect
@@ -281,14 +307,7 @@ function WaitingRoomContent() {
             router.push(`/patient/appointments/${appointmentId}`)
           }
           onConnected={() => setCallStartedAt(Date.now())}
-          tokenRefresher={async () => {
-            const { data } = await api.post<VideoTokenResponse>(
-              `/patient/appointments/${appointmentId}/video-token`,
-              {},
-            );
-            setTokenData(data);
-            return data.token;
-          }}
+          tokenRefresher={tokenRefresher}
           endLabel="Leave call"
           infoLabel="Appointment details"
           infoContent={

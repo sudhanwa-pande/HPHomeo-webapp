@@ -57,6 +57,8 @@ type LiveCallRoomProps = {
   onLeave: () => void;
   onBack?: () => void;
   onConnected?: () => void;
+  /** NOTE: Not actively used in livekit-client v2.x (no room.setToken API).
+   *  Kept for future SDK upgrades that may support in-session token rotation. */
   tokenRefresher?: () => Promise<string>;
   infoContent?: React.ReactNode;
   infoLabel?: string;
@@ -188,7 +190,7 @@ export function LiveCallRoom({
       if (!connectTimeoutRef.current) {
         connectTimeoutRef.current = setTimeout(() => {
           room.disconnect();
-        }, 20_000);
+        }, 45_000);
       }
     } else {
       if (connectTimeoutRef.current) {
@@ -204,38 +206,16 @@ export function LiveCallRoom({
     };
   }, [connectionState, room]);
 
-  // ── 3. Proactive token refresh — renew JWT before it expires ──
-  // The tokenRefresher callback should update the parent's token state,
-  // which flows into <LiveKitRoom token={...}> so the SDK uses the fresh
-  // token on reconnection attempts.
-  useEffect(() => {
-    if (!tokenRefresher || connectionState !== ConnectionState.Connected)
-      return;
-
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let cancelled = false;
-
-    function scheduleRefresh() {
-      // Refresh every 8 minutes — conservative for typical 10-min TTL tokens.
-      // The parent's tokenRefresher updates the token prop on <LiveKitRoom>.
-      timer = setTimeout(() => {
-        if (cancelled) return;
-        tokenRefresher!()
-          .then(() => {
-            if (!cancelled) scheduleRefresh();
-          })
-          .catch(() => {
-            // Silent — if refresh fails, SDK will eventually fire onDisconnected
-          });
-      }, 8 * 60 * 1000);
-    }
-
-    scheduleRefresh();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [connectionState, tokenRefresher]);
+  // ── 3. Token refresh — NOT needed with current architecture ──
+  // With TTL = 7200s (2 hours), the original JWT covers the entire consultation.
+  // livekit-client@2.x has no room.setToken() API. The only way to inject a new
+  // token is by changing the `token` prop on <LiveKitRoom>, which triggers
+  // room.connect() — a FULL WebRTC teardown + ICE restart. This would cause
+  // audio/video freezes every refresh cycle and is worse than no refresh at all.
+  // The JWT is only used for signaling (WebSocket); once the WebRTC peer
+  // connection is established, media flows independently. If the signaling
+  // WebSocket drops, the SDK reconnects using the original token (still valid
+  // for up to 2 hours). No proactive refresh is needed.
 
   // ── 4. Force chrome visible during Reconnecting on mobile ──
   useEffect(() => {
