@@ -34,7 +34,7 @@ import {
 
 import { openPdfBlob, fetchAndOpenPdf } from "@/lib/pdf";
 import api from "@/lib/api";
-import { hapticPulse, hapticSuccess } from "@/lib/haptics";
+import { hapticPulse, hapticSuccess, hapticTap, hapticWarning } from "@/lib/haptics";
 import { notifyApiError, notifyError, notifyInfo, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { AuthGuard } from "@/components/auth-guard";
@@ -750,7 +750,10 @@ function DetailContent() {
               {canComplete && (
                 <Button
                   className="w-full rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
-                  onClick={() => setActiveStep("complete")}
+                  onClick={() => {
+                    hapticTap();
+                    setActiveStep("complete");
+                  }}
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   Complete
@@ -827,7 +830,10 @@ function DetailContent() {
                   <button
                     key={step.key}
                     type="button"
-                    onClick={() => setActiveStep(step.key)}
+                    onClick={() => {
+                      hapticTap();
+                      setActiveStep(step.key);
+                    }}
                     className={cn(
                       "flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-xl px-4 py-2.5 text-xs font-medium transition-all",
                       isActive
@@ -855,7 +861,10 @@ function DetailContent() {
                 appointmentId={appointmentId}
                 appointment={apt}
                 minimized={activeStep !== "consultation"}
-                onMaximize={() => setActiveStep("consultation")}
+                onMaximize={() => {
+                  hapticTap();
+                  setActiveStep("consultation");
+                }}
               />
             )}
 
@@ -878,7 +887,10 @@ function DetailContent() {
                     appointment={apt}
                     appointmentId={appointmentId}
                     canStart={!!canStartConsultation}
-                    onOpenPrescription={() => setActiveStep("prescription")}
+                    onOpenPrescription={() => {
+                      hapticTap();
+                      setActiveStep("prescription");
+                    }}
                     callPanelRenderedOutside
                   />
                 )}
@@ -1511,7 +1523,10 @@ function PrescriptionSection({
                   variant="brand"
                   size="sm"
                   className="rounded-xl shadow-sm"
-                  onClick={onAddItem}
+                  onClick={() => {
+                    hapticPulse();
+                    onAddItem();
+                  }}
                 >
                   <Plus className="h-4 w-4" />
                   Add Medicine
@@ -1535,7 +1550,10 @@ function PrescriptionSection({
             {!isFinalized && canManage && (
               <button
                 type="button"
-                onClick={onAddItem}
+                onClick={() => {
+                  hapticPulse();
+                  onAddItem();
+                }}
                 className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border/60 py-2.5 text-xs font-medium text-brand-subtext transition-colors hover:border-brand/30 hover:text-brand"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -1667,7 +1685,10 @@ function MedicineCard({
       <div
         role="button"
         tabIndex={0}
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => {
+          hapticTap();
+          setExpanded(!expanded);
+        }}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(!expanded); } }}
         className="flex w-full cursor-pointer items-center gap-3 px-3 py-4 text-left sm:px-4"
       >
