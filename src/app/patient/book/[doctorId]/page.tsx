@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams, useParams } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,8 +18,6 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
-
-import { useEffect, useRef } from "react";
 
 import api, { getApiError } from "@/lib/api";
 import { beginPatientAppointmentPayment } from "@/lib/patient-payment";
