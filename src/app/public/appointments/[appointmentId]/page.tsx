@@ -526,63 +526,59 @@ function AppointmentPageClient() {
               Pick a date from the doctor&apos;s live calendar, then select one of the available time slots.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-6 px-6 pb-6 lg:grid-cols-[420px_1fr]">
-            <div className="rounded-[1.6rem] border border-slate-200/80 bg-slate-50/80 p-4">
-              <Calendar
-                mode="single"
-                selected={activeDate}
-                onSelect={(value) => {
-                  setSelectedDate(value);
-                  setSelectedSlot(null);
-                }}
-                disabled={(date) =>
-                  !availableDates.some(
-                    (d) => format(d, "yyyy-MM-dd") === format(date, "yyyy-MM-dd"),
-                  )
-                }
-                showOutsideDays={false}
-                numberOfMonths={1}
-                modifiers={{ available: availableDates }}
-                modifiersClassNames={{ available: "[&>button]:after:bg-emerald-500" }}
-                classNames={{
-                  root: "w-full",
-                  months: "w-full",
-                  month: "w-full",
-                  day_button:
-                    "h-11 w-11 rounded-xl font-medium text-brand-dark transition-colors hover:bg-brand-bg aria-selected:bg-brand aria-selected:text-white after:absolute after:bottom-1 after:left-1/2 after:h-1.5 after:w-1.5 after:-translate-x-1/2 after:rounded-full",
-                }}
-              />
-            </div>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-base font-semibold text-brand-dark">Available times</p>
-                  <p className="mt-1 text-sm text-brand-subtext">
-                    {slotsQuery.isLoading
-                      ? "Loading availability…"
-                      : activeDate
-                        ? format(activeDate, "EEEE, dd MMM yyyy")
-                        : `Choose a date within the next ${BOOKING_WINDOW_DAYS} days`}
-                  </p>
-                </div>
-                <Badge variant="outline" className="border-brand/20 bg-brand/5 text-brand-dark">
-                  {slotsQuery.data?.count ?? 0} open slots
-                </Badge>
+          <div className="space-y-6 px-6 pb-6">
+            {/* ── Date Selection (Horizontal Scroller) ── */}
+            <div className="space-y-3">
+              <p className="text-sm font-semibold text-brand-dark">Select Date</p>
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                {availableDates.map((date) => {
+                  const isSelected = activeDate && format(date, "yyyy-MM-dd") === format(activeDate, "yyyy-MM-dd");
+                  return (
+                    <button
+                      key={date.toISOString()}
+                      onClick={() => {
+                        setSelectedDate(date);
+                        setSelectedSlot(null);
+                      }}
+                      className={cn(
+                        "flex min-w-[72px] flex-col items-center rounded-2xl border-2 px-3 py-3 transition-all duration-200",
+                        isSelected
+                          ? "border-brand bg-brand/5 text-brand shadow-lg shadow-brand/10"
+                          : "border-slate-100 bg-white text-slate-500 hover:border-brand/30 hover:bg-brand-bg"
+                      )}
+                    >
+                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
+                        {format(date, "EEE")}
+                      </span>
+                      <span className="text-lg font-black">{format(date, "dd")}</span>
+                      <span className="text-[10px] font-medium">{format(date, "MMM")}</span>
+                    </button>
+                  );
+                })}
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            </div>
+
+            {/* ── Time Slots ── */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-brand-dark">
+                  Available on {activeDate ? format(activeDate, "EEEE, dd MMM") : "..."}
+                </p>
+                {!slotsQuery.isLoading && (
+                  <Badge variant="outline" className="border-brand/20 bg-brand/5 text-brand-dark">
+                    {activeDateSlots.length} slots
+                  </Badge>
+                )}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                 {slotsQuery.isLoading ? (
-                  <div className="col-span-full flex items-center gap-2 rounded-[1.5rem] bg-brand-bg px-4 py-5 text-sm text-brand-subtext">
+                  <div className="col-span-full flex items-center gap-2 rounded-2xl bg-brand-bg px-4 py-8 text-sm text-brand-subtext">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading available slots
-                  </div>
-                ) : slotsQuery.isError ? (
-                  <div className="col-span-full rounded-[1.5rem] border border-amber-200 bg-amber-50 px-4 py-6 text-sm text-amber-800">
-                    {isRateLimitError(slotsLoadError)
-                      ? `${getRateLimitDescription(slotsLoadError)} Then reopen this schedule picker.`
-                      : "We couldn't load availability right now. Please close this window and try again."}
+                    Loading available slots...
                   </div>
                 ) : activeDateSlots.length === 0 ? (
-                  <div className="col-span-full rounded-[1.5rem] bg-brand-bg px-4 py-10 text-center text-sm text-brand-subtext">
+                  <div className="col-span-full rounded-2xl bg-brand-bg px-4 py-12 text-center text-sm text-brand-subtext">
                     No slots are open for this date.
                   </div>
                 ) : (
@@ -593,33 +589,34 @@ function AppointmentPageClient() {
                         key={slot.start}
                         onClick={() => setSelectedSlot(slot)}
                         className={cn(
-                          "rounded-[1.4rem] border px-4 py-4 text-left transition-all",
+                          "group relative flex flex-col items-center justify-center rounded-2xl border-2 px-4 py-4 transition-all",
                           active
-                            ? "border-brand bg-brand text-white shadow-sm"
-                            : "border-slate-200 bg-white hover:border-brand/30 hover:bg-brand-bg",
+                            ? "border-brand bg-brand text-white shadow-lg shadow-brand/20"
+                            : "border-slate-100 bg-white hover:border-brand/30 hover:bg-brand-bg"
                         )}
                       >
-                        <p className="text-sm font-semibold">{format(parseISO(slot.start), "hh:mm a")}</p>
-                        <p className={cn("mt-1 text-xs", active ? "text-white/75" : "text-brand-subtext")}>
-                          {slot.duration_minutes} min consultation
-                        </p>
+                        <span className="text-sm font-bold">{format(parseISO(slot.start), "hh:mm a")}</span>
+                        <span className={cn("mt-1 text-[10px] font-medium", active ? "text-white/70" : "text-brand-subtext/60")}>
+                          {slot.duration_minutes} min
+                        </span>
                       </button>
                     );
                   })
                 )}
               </div>
+            </div>
 
-              <Separator />
+            <Separator className="bg-slate-100" />
 
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-brand-dark">Note for the clinic</p>
-                <Input
-                  value={rescheduleReason}
-                  onChange={(e) => setRescheduleReason(e.target.value)}
-                  placeholder="Optional note"
-                  maxLength={500}
-                />
-              </div>
+            <div className="space-y-3">
+              <p className="text-sm font-semibold text-brand-dark">Note for the clinic</p>
+              <Input
+                value={rescheduleReason}
+                onChange={(e) => setRescheduleReason(e.target.value)}
+                placeholder="Why are you rescheduling? (Optional)"
+                className="rounded-2xl border-slate-100 bg-white px-4 py-6 text-sm shadow-sm transition-all focus:border-brand/30 focus:ring-brand/10"
+                maxLength={500}
+              />
             </div>
           </div>
           <DialogFooter>

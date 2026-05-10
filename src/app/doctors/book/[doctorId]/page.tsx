@@ -1015,28 +1015,28 @@ export default function BookDoctorPage() {
           </div>
 
           {/* Step indicator */}
-          <div className="mb-6 flex items-center gap-0">
+          <div className="mb-8 flex items-center justify-between px-2">
             {STEPS.map((s, i) => {
               const isActive = s.key === step;
               const isPast =
                 (s.key === "slot" && (step === "details" || step === "review")) ||
                 (s.key === "details" && step === "review");
               return (
-                <div key={s.key} className="flex flex-1 items-center">
-                  <div className="flex flex-1 flex-col items-center gap-1.5">
+                <div key={s.key} className="flex items-center gap-2 group">
+                  <div className="flex flex-col items-center gap-1.5">
                     <div
-                      className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-all ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold transition-all ${
                         isPast
-                          ? "bg-green-100 text-green-600"
+                          ? "bg-green-100 text-green-600 ring-2 ring-green-100"
                           : isActive
-                          ? "bg-brand text-white shadow-md shadow-brand/20"
+                          ? "bg-brand text-white shadow-lg shadow-brand/20 ring-4 ring-brand/10"
                           : "bg-gray-100 text-brand-subtext/40"
                       }`}
                     >
                       {isPast ? <Check className="h-4 w-4" /> : s.number}
                     </div>
                     <span
-                      className={`text-[11px] font-medium transition-colors ${
+                      className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${
                         isActive ? "text-brand-dark" : isPast ? "text-green-600" : "text-brand-subtext/40"
                       }`}
                     >
@@ -1044,11 +1044,7 @@ export default function BookDoctorPage() {
                     </span>
                   </div>
                   {i < STEPS.length - 1 && (
-                    <div
-                      className={`h-px flex-1 -mt-5 ${
-                        isPast ? "bg-green-200" : "bg-gray-200"
-                      }`}
-                    />
+                    <div className="h-px w-6 sm:w-12 bg-gray-200 mb-5" />
                   )}
                 </div>
               );
@@ -1071,25 +1067,25 @@ export default function BookDoctorPage() {
                 {doctor.available_modes && doctor.available_modes.length > 1 && (
                   <div className="rounded-2xl bg-white p-5 shadow-sm border border-gray-100/80">
                     <p className="text-sm font-medium text-brand-subtext mb-3">Consultation type</p>
-                    <div className="flex gap-3">
+                    <div className="flex flex-col sm:flex-row gap-3">
                       {doctor.available_modes.includes("online") && (
                         <button
                           onClick={() => {
                             setMode("online");
                             setPaymentChoice("pay_now");
                           }}
-                          className={`flex flex-1 items-center gap-3 rounded-xl border-2 p-3 sm:p-4 text-left transition-all ${
+                          className={`flex items-center gap-3 rounded-2xl border-2 p-3.5 sm:p-4 text-left transition-all ${
                             mode === "online"
-                              ? "border-brand bg-brand/5 shadow-sm shadow-brand/10"
+                              ? "border-brand bg-brand/5 shadow-md shadow-brand/10"
                               : "border-gray-200/60 bg-white hover:border-brand/30"
-                          }`}
+                          } sm:flex-1`}
                         >
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50">
                             <MonitorPlay className="h-5 w-5 text-brand" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-brand-dark">Online</p>
-                            <p className="text-xs text-brand-subtext">Video consultation</p>
+                            <p className="text-sm font-bold text-brand-dark">Online</p>
+                            <p className="text-[11px] text-brand-subtext">Video call</p>
                           </div>
                           <p className="text-sm font-bold text-brand-dark shrink-0">
                             ₹{doctor.online_fee || 0}
@@ -1099,18 +1095,18 @@ export default function BookDoctorPage() {
                       {doctor.available_modes.includes("walk_in") && (
                         <button
                           onClick={() => setMode("walk_in")}
-                          className={`flex flex-1 items-center gap-3 rounded-xl border-2 p-3 sm:p-4 text-left transition-all ${
+                          className={`flex items-center gap-3 rounded-2xl border-2 p-3.5 sm:p-4 text-left transition-all ${
                             mode === "walk_in"
-                              ? "border-brand bg-brand/5 shadow-sm shadow-brand/10"
+                              ? "border-brand bg-brand/5 shadow-md shadow-brand/10"
                               : "border-gray-200/60 bg-white hover:border-brand/30"
-                          }`}
+                          } sm:flex-1`}
                         >
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
                             <User className="h-5 w-5 text-emerald-600" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-brand-dark">Walk-in</p>
-                            <p className="text-xs text-brand-subtext truncate">
+                            <p className="text-sm font-bold text-brand-dark">Walk-in</p>
+                            <p className="text-[11px] text-brand-subtext truncate">
                               {doctor.clinic_name || "Clinic visit"}
                             </p>
                           </div>
@@ -1135,8 +1131,8 @@ export default function BookDoctorPage() {
 
                   <div className="h-px bg-gray-200/80 mb-4" />
 
-                  {/* 7-day picker */}
-                  <div className="flex gap-0 mb-5">
+                  {/* 7-day picker (Mobile Optimized Scroller) */}
+                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
                     {dateOptions.map((date, idx) => {
                       const isSelected = selectedDate ? date.toDateString() === selectedDate.toDateString() : false;
                       const dayLabel = idx === 0
@@ -1149,19 +1145,25 @@ export default function BookDoctorPage() {
                             setSelectedDate(date);
                             setSelectedSlot(null);
                           }}
-                          className="flex flex-1 flex-col items-center py-2 transition-all duration-200"
+                          className={cn(
+                            "flex min-w-[64px] flex-col items-center rounded-2xl border-2 py-3 transition-all duration-200",
+                            isSelected
+                              ? "border-brand bg-brand/5 shadow-lg shadow-brand/10"
+                              : "border-slate-100 bg-white hover:border-brand/20"
+                          )}
                         >
-                          <span className={`text-[11px] mb-1 ${idx === 0 ? "font-semibold text-brand" : "text-brand-subtext"}`}>
+                          <span className={`text-[10px] font-bold uppercase tracking-tight mb-1 ${isSelected ? "text-brand" : "text-brand-subtext/60"}`}>
                             {dayLabel}
                           </span>
                           <span
-                            className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold transition-all ${
-                              isSelected
-                                ? "bg-brand text-white shadow-md shadow-brand/20"
-                                : "text-brand-dark hover:bg-gray-100"
+                            className={`text-lg font-black ${
+                              isSelected ? "text-brand" : "text-brand-dark"
                             }`}
                           >
                             {date.getDate()}
+                          </span>
+                          <span className={`text-[10px] font-medium ${isSelected ? "text-brand/70" : "text-brand-subtext/40"}`}>
+                            {date.toLocaleDateString("en-US", { month: "short" })}
                           </span>
                         </button>
                       );

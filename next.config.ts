@@ -32,11 +32,11 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://*.razorpay.com`,
+              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://*.razorpay.com https://static.cloudflareinsights.com`,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://res.cloudinary.com",
               "font-src 'self'",
-              "connect-src 'self' https://*.razorpay.com wss://*.livekit.cloud https://*.livekit.cloud" +
+              "connect-src 'self' https://*.razorpay.com https://static.cloudflareinsights.com wss://*.livekit.cloud https://*.livekit.cloud" +
                 // Only append NEXT_PUBLIC_API_URL when it's an absolute URL.
                 // Relative paths like "/api/v1" aren't valid CSP sources and
                 // get ignored by the browser (with a console warning).

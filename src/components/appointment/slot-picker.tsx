@@ -141,10 +141,12 @@ export function SlotPicker({
       {/* Date selection */}
       {(variant === "week" || variant === "both") && (
         <div>
-          <p className="mb-2 text-xs font-semibold text-gray-500">
-            Quick select
-          </p>
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          {variant === "both" && (
+            <p className="mb-2 text-xs font-semibold text-gray-500">
+              Quick select
+            </p>
+          )}
+          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
             {weekDates.map((date) => {
               const isSelected =
                 date.toDateString() === selectedDate.toDateString();
@@ -158,19 +160,21 @@ export function SlotPicker({
                   }}
                   disabled={!!isPast}
                   className={cn(
-                    "flex shrink-0 flex-col items-center rounded-xl border-2 px-3 py-2 transition-all duration-200",
+                    "flex min-w-[70px] shrink-0 flex-col items-center rounded-2xl border-2 px-3 py-3 transition-all duration-200",
                     isSelected
                       ? "border-brand bg-brand/5 text-brand shadow-lg shadow-brand/10"
                       : isPast
-                        ? "border-gray-100 text-gray-300 cursor-not-allowed"
-                        : "border-gray-200/60 text-gray-500 hover:border-brand/30",
+                        ? "border-gray-100 text-gray-300 cursor-not-allowed opacity-50"
+                        : "border-gray-100 bg-white text-gray-500 hover:border-brand/30 hover:bg-brand-bg",
                   )}
                 >
-                  <span className="text-[10px] font-semibold uppercase">
+                  <span className={cn("text-[10px] font-bold uppercase tracking-tight", isSelected ? "text-brand" : "text-gray-400")}>
                     {date.toLocaleDateString("en-IN", { weekday: "short" })}
                   </span>
-                  <span className="text-lg font-bold">{date.getDate()}</span>
-                  <span className="text-[10px]">
+                  <span className={cn("text-lg font-black", isSelected ? "text-brand" : "text-gray-900")}>
+                    {date.getDate()}
+                  </span>
+                  <span className={cn("text-[10px] font-medium", isSelected ? "text-brand/70" : "text-gray-400")}>
                     {date.toLocaleDateString("en-IN", { month: "short" })}
                   </span>
                 </button>

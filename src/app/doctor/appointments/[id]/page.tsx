@@ -1508,18 +1508,18 @@ function PrescriptionSection({
             actions={
               !isFinalized && canManage ? (
                 <Button
-                  variant="outline"
+                  variant="brand"
                   size="sm"
-                  className="rounded-xl"
+                  className="rounded-xl shadow-sm"
                   onClick={onAddItem}
                 >
-                  <Plus className="h-3.5 w-3.5" />
+                  <Plus className="h-4 w-4" />
                   Add Medicine
                 </Button>
               ) : undefined
             }
           >
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               {payload.items.map((item, index) => (
                 <MedicineCard
                   key={`medicine-${index}`}
@@ -1664,13 +1664,12 @@ function MedicineCard({
           : "border-border/60 bg-brand-bg/20 hover:border-brand/15",
       )}
     >
-      {/* Collapsed header */}
       <div
         role="button"
         tabIndex={0}
         onClick={() => setExpanded(!expanded)}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(!expanded); } }}
-        className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left"
+        className="flex w-full cursor-pointer items-center gap-3 px-3 py-4 text-left sm:px-4"
       >
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-[11px] font-bold text-brand">
           {index + 1}
@@ -1678,47 +1677,51 @@ function MedicineCard({
         <div className="min-w-0 flex-1">
           <p
             className={cn(
-              "truncate text-sm font-medium",
-              hasName ? "text-brand-dark" : "text-brand-subtext",
+              "truncate text-sm font-semibold",
+              hasName ? "text-brand-dark" : "text-brand-subtext/70",
             )}
           >
-            {hasName ? item.name : "Untitled medicine"}
+            {hasName ? item.name : "New Medicine"}
           </p>
           {summary && !expanded && (
-            <p className="truncate text-xs text-brand-subtext">{summary}</p>
+            <p className="mt-0.5 truncate text-[11px] text-brand-subtext">{summary}</p>
           )}
         </div>
         {!disabled && (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5 sm:gap-1">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                hapticPulse();
                 onDuplicate();
               }}
-              className="rounded-lg p-1 text-brand-subtext/60 hover:bg-brand-bg hover:text-brand-dark"
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-bg/50 text-brand-subtext/70 transition-colors active:scale-90 hover:bg-brand-bg hover:text-brand-dark sm:h-8 sm:w-8"
               title="Duplicate"
             >
-              <Copy className="h-3.5 w-3.5" />
+              <Copy className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                hapticWarning();
                 onRemove();
               }}
-              className="rounded-lg p-1 text-brand-subtext/60 hover:bg-red-50 hover:text-red-600"
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-50/50 text-red-400 transition-colors active:scale-90 hover:bg-red-50 hover:text-red-600 sm:h-8 sm:w-8"
               title="Remove"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-4 w-4" />
             </button>
           </div>
         )}
-        {expanded ? (
-          <ChevronUp className="h-4 w-4 text-brand-subtext/60" />
-        ) : (
-          <ChevronDown className="h-4 w-4 text-brand-subtext/60" />
-        )}
+        <div className="ml-1 shrink-0">
+          {expanded ? (
+            <ChevronUp className="h-4 w-4 text-brand-subtext/40" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-brand-subtext/40" />
+          )}
+        </div>
       </div>
 
       {/* Expanded fields */}
@@ -1731,76 +1734,76 @@ function MedicineCard({
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="border-t border-border/40 px-4 pb-4 pt-3">
+            <div className="border-t border-border/40 px-3 pb-4 pt-4 sm:px-4">
               {/* Medicine name + dosage — paired together */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-brand-subtext/70">
+                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                     Medicine name
                   </label>
                   <Input
                     value={item.name}
                     onChange={(e) => onUpdate("name", e.target.value)}
                     disabled={disabled}
-                    placeholder="Medicine name"
-                    className="scroll-mt-24 rounded-lg"
+                    placeholder="e.g. Paracetamol"
+                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
                     onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-brand-subtext/70">
+                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                     Dosage
                   </label>
                   <Input
                     value={item.dosage || ""}
                     onChange={(e) => onUpdate("dosage", e.target.value)}
                     disabled={disabled}
-                    placeholder="e.g. 200mg"
-                    className="scroll-mt-24 rounded-lg"
+                    placeholder="e.g. 500mg"
+                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
                     onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                   />
                 </div>
               </div>
               {/* Frequency + Duration — paired together */}
-              <div className="mt-2 grid grid-cols-2 gap-3 sm:mt-3">
+              <div className="mt-4 grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-brand-subtext/70">
+                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                     Frequency
                   </label>
                   <Input
                     value={item.frequency || ""}
                     onChange={(e) => onUpdate("frequency", e.target.value)}
                     disabled={disabled}
-                    placeholder="e.g. Twice daily"
-                    className="scroll-mt-24 rounded-lg"
+                    placeholder="e.g. 1-0-1"
+                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
                     onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-brand-subtext/70">
+                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                     Duration
                   </label>
                   <Input
                     value={item.duration || ""}
                     onChange={(e) => onUpdate("duration", e.target.value)}
                     disabled={disabled}
-                    placeholder="e.g. 7 days"
-                    className="scroll-mt-24 rounded-lg"
+                    placeholder="e.g. 5 days"
+                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
                     onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                   />
                 </div>
               </div>
               {/* Instructions — full width */}
-              <div className="mt-2 sm:mt-3">
-                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-brand-subtext/70">
+              <div className="mt-4">
+                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                   Instructions
                 </label>
                 <Input
                   value={item.instructions || ""}
                   onChange={(e) => onUpdate("instructions", e.target.value)}
                   disabled={disabled}
-                  placeholder="e.g. After meals"
-                  className="scroll-mt-24 rounded-lg"
+                  placeholder="e.g. After food"
+                  className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
                   onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                 />
               </div>

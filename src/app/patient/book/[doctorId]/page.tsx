@@ -75,6 +75,13 @@ function BookingContent() {
   const [processingMessage, setProcessingMessage] = useState("");
   const [bookedData, setBookedData] = useState<BookingResponse | null>(null);
 
+  const maxBookingDate = useMemo(() => {
+    const d = new Date();
+    d.setHours(23, 59, 59, 999);
+    d.setDate(d.getDate() + 7);
+    return d;
+  }, []);
+
   const { data: doctor, isLoading: doctorLoading } = useQuery({
     queryKey: ["public", "doctor", doctorId],
     queryFn: async () => {
@@ -507,7 +514,8 @@ function BookingContent() {
                     selectedSlot={selectedSlot}
                     onDateChange={(d) => { setSelectedDate(d); setSelectedSlot(null); }}
                     onSlotChange={setSelectedSlot}
-                    variant="both"
+                    variant="week"
+                    maxDate={maxBookingDate}
                     groupByTimeOfDay
                   />
 

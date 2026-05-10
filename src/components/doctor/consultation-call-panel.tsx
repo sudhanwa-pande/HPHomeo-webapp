@@ -73,13 +73,20 @@ const PIP_MARGIN_BOTTOM_MOBILE = 80; // bottom-20 equivalent — avoids gesture 
 
 function getDefaultPos(el?: HTMLDivElement | null): { x: number; y: number } {
   if (typeof window === "undefined") return { x: 0, y: 0 };
-  const elW = el?.offsetWidth ?? PIP_WIDTH_SM;
-  const elH = el?.offsetHeight ?? 252;
-  // On narrow screens, position higher to avoid bottom nav / gesture conflicts
-  const bottomMargin = window.innerWidth < 640 ? PIP_MARGIN_BOTTOM_MOBILE : PIP_MARGIN;
+  const elW = el?.offsetWidth ?? (window.innerWidth < 640 ? 200 : PIP_WIDTH_SM);
+  const elH = el?.offsetHeight ?? (window.innerWidth < 640 ? 150 : 252);
+  
+  // On mobile, default to top-right to avoid keyboard overlap by default
+  if (window.innerWidth < 640) {
+    return {
+      x: window.innerWidth - elW - PIP_MARGIN,
+      y: PIP_MARGIN + 60, // below header
+    };
+  }
+  
   return {
-    x: Math.max(PIP_MARGIN, window.innerWidth - elW - PIP_MARGIN),
-    y: Math.max(PIP_MARGIN, window.innerHeight - elH - bottomMargin),
+    x: window.innerWidth - elW - PIP_MARGIN,
+    y: window.innerHeight - elH - PIP_MARGIN,
   };
 }
 
@@ -140,17 +147,43 @@ export function ConsultationCallPanel({
   // Clamp to viewport (memoized)
   const clamp = useCallback((x: number, y: number) => {
     const el = containerRef.current;
-    const elW = el?.offsetWidth ?? PIP_WIDTH_SM;
-    const elH = el?.offsetHeight ?? 252;
-    return clampPos(x, y, elW, elH);
+    const elW = el?.offsetWidth ?? (window.innerWidth < 640 ? 200 : PIP_WIDTH_SM);
+    const elH = el?.offsetHeight ?? (window.innerWidth < 640 ? 150 : 252);
+    
+    if (typeof window === "undefined") return { x, y };
+    
+    // Use Visual Viewport API to account for keyboard on mobile
+    const vv = window.visualViewport;
+    const viewW = vv ? vv.width : window.innerWidth;
+    const viewH = vv ? vv.height : window.innerHeight;
+    const offsetLeft = vv ? vv.offsetLeft : 0;
+    const offsetTop = vv ? vv.offsetTop : 0;
+
+    return {
+      x: Math.max(offsetLeft + PIP_MARGIN, Math.min(x, offsetLeft + viewW - elW - PIP_MARGIN)),
+      y: Math.max(offsetTop + PIP_MARGIN, Math.min(y, offsetTop + viewH - elH - PIP_MARGIN)),
+    };
   }, []);
 
-  // Re-clamp when viewport resizes
+  // Re-clamp when visual viewport changes (keyboard show/hide, zoom, resize)
   useEffect(() => {
     if (!minimized) return;
-    const onResize = () => setPos((p) => (p ? clamp(p.x, p.y) : p));
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    const vv = window.visualViewport;
+    const onVVChange = () => setPos((p) => (p ? clamp(p.x, p.y) : p));
+    
+    if (vv) {
+      vv.addEventListener("resize", onVVChange);
+      vv.addEventListener("scroll", onVVChange);
+    }
+    window.addEventListener("resize", onVVChange);
+    
+    return () => {
+      if (vv) {
+        vv.removeEventListener("resize", onVVChange);
+        vv.removeEventListener("scroll", onVVChange);
+      }
+      window.removeEventListener("resize", onVVChange);
+    };
   }, [minimized, clamp]);
 
   // Block text selection on body while dragging (prevents selecting prescription text)
@@ -298,13 +331,13 @@ export function ConsultationCallPanel({
           "overflow-hidden rounded-2xl",
           minimized
             ? cn(
-                "fixed z-50 w-[240px] border bg-[#111113] sm:w-[320px]",
+                "fixed z-50 w-[200px] border bg-[#111113] sm:w-[320px]",
                 // Elevated shadow + ring during drag for visual feedback
                 isDragging
-                  ? "cursor-grabbing border-white/20 shadow-[0_24px_64px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.08)]"
-                  : "cursor-default border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.45)]",
+                  ? "cursor-grabbing border-brand/40 opacity-75 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)]"
+                  : "cursor-default border-white/10 shadow-[0_12px_48px_rgba(0,0,0,0.5)]",
                 // Smooth position transition only when NOT dragging (for snap/resize)
-                !isDragging && "transition-[left,top] duration-200 ease-out",
+                !isDragging && "transition-[left,top,opacity] duration-300 ease-out",
                 // Hide until position is computed (prevents SSR/top-left flash)
                 !pos && "invisible",
               )
@@ -319,20 +352,24 @@ export function ConsultationCallPanel({
             onPointerUp={handleDragPointerUp}
             onPointerCancel={handleDragPointerUp}
             className={cn(
-              "flex h-8 select-none items-center gap-2 border-b border-white/[0.07] px-3",
+              "flex h-9 select-none items-center gap-2 border-b border-white/[0.07] px-3",
               isDragging ? "cursor-grabbing" : "cursor-grab",
             )}
-            // Stop propagation so clicks on drag handle don't bubble to any parent handlers
             onClick={(e) => e.stopPropagation()}
           >
-            <GripHorizontal className="h-3.5 w-3.5 shrink-0 text-white/25" />
-            <span className="flex-1 truncate text-[11px] font-medium text-white/50">
+            <GripHorizontal className="h-3.5 w-3.5 shrink-0 text-white/30" />
+            <span className="flex-1 truncate text-[10px] font-bold uppercase tracking-wide text-white/50">
               {appointment.patient.full_name}
             </span>
-            {/* Subtle "move" hint — visible on hover only via group */}
-            <span className="shrink-0 rounded-sm bg-white/[0.05] px-1 py-px text-[9px] font-medium uppercase tracking-wider text-white/20">
-              move
-            </span>
+            <button
+              onClick={() => {
+                hapticTap();
+                if (onMaximize) onMaximize();
+              }}
+              className="flex h-6 w-6 items-center justify-center rounded-md bg-white/[0.08] text-white/60 hover:bg-white/[0.15] hover:text-white"
+            >
+              <Maximize2 className="h-3 w-3" />
+            </button>
           </div>
         )}
 

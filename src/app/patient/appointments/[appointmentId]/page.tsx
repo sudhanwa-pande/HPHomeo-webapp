@@ -128,6 +128,13 @@ function AppointmentDetailContent() {
     },
   });
 
+  const maxBookingDate = useMemo(() => {
+    const d = new Date();
+    d.setHours(23, 59, 59, 999);
+    d.setDate(d.getDate() + 7);
+    return d;
+  }, []);
+
   const { data, isLoading } = useQuery({
     queryKey: ["patient", "appointment", appointmentId],
     queryFn: async () => {
@@ -713,6 +720,7 @@ function AppointmentDetailContent() {
               onDateChange={() => actions.setRescheduleSlot(null)}
               onSlotChange={actions.setRescheduleSlot}
               variant="week"
+              maxDate={maxBookingDate}
               groupByTimeOfDay
               showSuggestions
             />

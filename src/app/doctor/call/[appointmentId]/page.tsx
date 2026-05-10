@@ -419,7 +419,7 @@ function CallRoomContent() {
             <Button
               variant="outline"
               className="h-11 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
-              onClick={() => router.push("/doctor/appointments")}
+              onClick={() => router.push(`/doctor/appointments/${appointmentId}`)}
             >
               <ArrowLeft className="h-4 w-4" />
               Back to appointments
@@ -446,7 +446,7 @@ function CallRoomContent() {
           <Button
             variant="outline"
             className="mt-6 h-11 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
-            onClick={() => router.push("/doctor/appointments")}
+            onClick={() => router.push(`/doctor/appointments/${appointmentId}`)}
           >
             <ArrowLeft className="h-4 w-4" />
             Back to appointments
@@ -474,7 +474,7 @@ function CallRoomContent() {
         onJoinWithoutMedia={() => void joinCall({ audio: false, video: false })}
         onBack={() => {
           clearResumeState();
-          router.push("/doctor/appointments");
+          router.push(`/doctor/appointments/${appointmentId}`);
         }}
       />
     );
@@ -499,7 +499,7 @@ function CallRoomContent() {
         remoteLabel={appointment?.patient?.full_name ?? "Patient"}
         remoteWaitingTitle={appointment?.patient?.full_name ? `Waiting for ${appointment.patient.full_name}` : "Waiting for patient"}
         remoteWaitingDescription="The patient will appear here when they join the consultation room."
-        onBack={() => router.push("/doctor/appointments")}
+        onBack={() => router.push(`/doctor/appointments/${appointmentId}`)}
         onLeave={() => endCallMutation.mutate()}
         onConnected={() => setCallStartedAt(Date.now())}
         tokenRefresher={tokenRefresher}

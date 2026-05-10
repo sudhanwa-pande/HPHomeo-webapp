@@ -98,6 +98,13 @@ function AppointmentsContent() {
     ? appointments.find((a) => a.appointment_id === actions.rescheduleId)
     : null;
 
+  const maxBookingDate = useMemo(() => {
+    const d = new Date();
+    d.setHours(23, 59, 59, 999);
+    d.setDate(d.getDate() + 7);
+    return d;
+  }, []);
+
   // Cancel data
   const cancelApt = actions.cancellingId
     ? appointments.find((a) => a.appointment_id === actions.cancellingId)
@@ -332,6 +339,7 @@ function AppointmentsContent() {
                 onDateChange={() => actions.setRescheduleSlot(null)}
                 onSlotChange={actions.setRescheduleSlot}
                 variant="week"
+                maxDate={maxBookingDate}
                 groupByTimeOfDay
                 showSuggestions
               />
