@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import api from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   formatDateLong,
   formatTime,
