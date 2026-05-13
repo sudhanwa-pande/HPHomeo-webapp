@@ -125,6 +125,12 @@ function AppointmentPageClient() {
   const [selectedSlot, setSelectedSlot] = useState<PublicAvailableSlot | null>(null);
   const [accessReady, setAccessReady] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(new Date()), 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -243,8 +249,28 @@ function AppointmentPageClient() {
     ];
   }, [appointment]);
 
-  const canJoinCall =
+  const isOnlineConfirmed =
     appointment?.video_enabled && appointment.mode === "online" && appointment.status === "confirmed";
+
+  const { isJoinWindowOpen, joinMessage, isTooLate } = useMemo(() => {
+    if (!appointment?.scheduled_at) return { isJoinWindowOpen: false, joinMessage: "", isTooLate: false };
+    const scheduledTime = parseISO(appointment.scheduled_at).getTime();
+    const start = scheduledTime - 10 * 60 * 1000;
+    const end = scheduledTime + 30 * 60 * 1000;
+    const current = currentTime.getTime();
+    
+    if (current < start) {
+      const mins = Math.ceil((start - current) / 60000);
+      if (mins > 60) {
+        return { isJoinWindowOpen: false, joinMessage: `Join available 10 mins before`, isTooLate: false };
+      }
+      return { isJoinWindowOpen: false, joinMessage: `Join available in ${mins} min${mins !== 1 ? 's' : ''}`, isTooLate: false };
+    }
+    if (current > end) {
+      return { isJoinWindowOpen: false, joinMessage: "Call window has ended", isTooLate: true };
+    }
+    return { isJoinWindowOpen: true, joinMessage: "Join video consultation", isTooLate: false };
+  }, [appointment?.scheduled_at, currentTime]);
 
   // ── Loading ──────────────────────────────────────────────────────
   if (!accessReady || appointmentQuery.isLoading) {
@@ -354,14 +380,20 @@ function AppointmentPageClient() {
                 {sc.label}
               </div>
 
-              {canJoinCall && (
-                <Button
-                  className="h-10 rounded-2xl bg-brand-accent px-5 text-sm font-semibold text-brand-dark shadow-[0_8px_24px_rgba(216,238,83,0.28)] transition-all hover:-translate-y-px hover:bg-[#d0e64b] hover:shadow-[0_12px_32px_rgba(216,238,83,0.36)]"
-                  onClick={() => router.push(`/public/appointments/${appointmentId}/call`)}
-                >
-                  <Video className="h-3.5 w-3.5" />
-                  Join call
-                </Button>
+              {isOnlineConfirmed && !isTooLate && (
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    className="relative h-11 rounded-[1.2rem] bg-brand-accent px-6 text-sm font-bold text-brand-dark shadow-[0_8px_24px_rgba(216,238,83,0.35)] transition-all hover:-translate-y-0.5 hover:bg-[#d0e64b] hover:shadow-[0_12px_32px_rgba(216,238,83,0.45)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                    onClick={() => router.push(`/public/appointments/${appointmentId}/call`)}
+                    disabled={!isJoinWindowOpen}
+                  >
+                    {isJoinWindowOpen && (
+                      <span className="absolute -inset-1 -z-10 animate-pulse rounded-[1.4rem] bg-brand-accent/40 blur-md" />
+                    )}
+                    <Video className="h-4 w-4 mr-1.5" />
+                    {isJoinWindowOpen ? "Join call" : joinMessage}
+                  </Button>
+                </motion.div>
               )}
             </div>
           </div>
@@ -435,14 +467,20 @@ function AppointmentPageClient() {
                 <CardDescription className="text-sm">Manage this booking from here.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {canJoinCall && (
-                  <Button
-                    className="h-[54px] w-full justify-between rounded-[1.4rem] bg-brand-accent px-5 text-sm font-semibold text-brand-dark shadow-[0_8px_32px_rgba(216,238,83,0.28)] transition-all hover:-translate-y-px hover:bg-[#d0e64b] hover:shadow-[0_14px_40px_rgba(216,238,83,0.36)]"
-                    onClick={() => router.push(`/public/appointments/${appointmentId}/call`)}
-                  >
-                    Join video consultation
-                    <Video className="h-4 w-4" />
-                  </Button>
+                {isOnlineConfirmed && !isTooLate && (
+                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    <Button
+                      className="relative h-[56px] w-full justify-between rounded-[1.4rem] bg-brand-accent px-5 text-[15px] font-bold text-brand-dark shadow-[0_8px_32px_rgba(216,238,83,0.3)] transition-all hover:-translate-y-1 hover:bg-[#d0e64b] hover:shadow-[0_14px_40px_rgba(216,238,83,0.4)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                      onClick={() => router.push(`/public/appointments/${appointmentId}/call`)}
+                      disabled={!isJoinWindowOpen}
+                    >
+                      {isJoinWindowOpen && (
+                        <span className="absolute -inset-1 -z-10 animate-pulse rounded-[1.6rem] bg-brand-accent/50 blur-lg" />
+                      )}
+                      {joinMessage}
+                      <Video className="h-5 w-5" />
+                    </Button>
+                  </motion.div>
                 )}
                 <Button
                   className="h-[52px] w-full justify-between rounded-[1.4rem] bg-brand text-white shadow-[0_8px_24px_rgba(88,155,255,0.22)] transition-all hover:bg-brand/90 hover:shadow-[0_12px_32px_rgba(88,155,255,0.3)] disabled:opacity-50"
@@ -519,7 +557,7 @@ function AppointmentPageClient() {
           }
         }}
       >
-        <DialogContent className="max-w-5xl rounded-[1.8rem] p-0">
+        <DialogContent className="max-w-5xl rounded-[1.8rem] p-0 max-h-[90vh] overflow-y-auto">
           <DialogHeader className="px-6 pt-6">
             <DialogTitle>Choose a new slot</DialogTitle>
             <DialogDescription>
@@ -571,7 +609,7 @@ function AppointmentPageClient() {
                 )}
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                 {slotsQuery.isLoading ? (
                   <div className="col-span-full flex items-center gap-2 rounded-2xl bg-brand-bg px-4 py-8 text-sm text-brand-subtext">
                     <Loader2 className="h-4 w-4 animate-spin" />

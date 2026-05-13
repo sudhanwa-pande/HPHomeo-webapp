@@ -34,6 +34,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
+import { motion } from "framer-motion";
 
 import { notifyError, notifyInfo } from "@/lib/notify";
 import { playIncomingMessageSound } from "@/lib/sound";
@@ -168,6 +169,7 @@ export function LiveCallRoom({
   const chatMessageCountRef = useRef(0);
   const chromeHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   // Tracks whether the remote participant ever joined this session
   const hasHadRemoteRef = useRef(false);
   // Fires onConnected exactly once when the room first reaches Connected
@@ -493,7 +495,7 @@ export function LiveCallRoom({
         {/* ── Top bar ─────────────────────────────────────────── */}
         <header
           className={cn(
-            "z-30 flex-shrink-0 transition-all duration-300",
+            "absolute inset-x-0 top-0 z-30 transition-all duration-300 bg-gradient-to-b from-[#111113]/80 via-[#111113]/40 to-transparent",
             isMobileViewport
               ? mobileChromeVisible
                 ? "translate-y-0 opacity-100"
@@ -595,7 +597,7 @@ export function LiveCallRoom({
         </header>
 
         {/* ── Video area ──────────────────────────────────────── */}
-        <div className="relative min-h-0 flex-1">
+        <div className="relative h-full w-full overflow-hidden" ref={containerRef}>
           {/* Remote video / waiting state */}
           <div className="absolute inset-0">
             {remoteScreenTrack ? (
@@ -606,7 +608,7 @@ export function LiveCallRoom({
             ) : remoteVideoTrack ? (
               <VideoTrack
                 trackRef={remoteVideoTrack}
-                className="h-full w-full object-contain bg-[#111113]"
+                className="h-full w-full object-cover bg-[#111113]"
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(ellipse_at_center,#1a1a1f_0%,#111113_70%)]">
@@ -704,20 +706,25 @@ export function LiveCallRoom({
           )}
 
           {/* ── Local PiP preview (bottom-right) ───────────── */}
-          <div
+          <motion.div
+            drag
+            dragConstraints={containerRef}
+            dragElastic={0.05}
+            dragMomentum={false}
             className={cn(
-              "absolute z-10 transition-all duration-300",
+              "absolute z-10 cursor-grab active:cursor-grabbing touch-none",
               isMobileViewport
-                ? "right-3 w-[28vw] min-w-[88px] max-w-[130px]"
-                : "right-5 w-[160px]",
+                ? "w-[28vw] min-w-[88px] max-w-[130px]"
+                : "w-[160px]",
             )}
             style={{
               bottom: isMobileViewport
                 ? "calc(7.5rem + env(safe-area-inset-bottom, 0px))"
                 : "6.5rem",
+              right: isMobileViewport ? "12px" : "20px",
             }}
           >
-            <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#1a1a1f] shadow-[0_8px_32px_rgba(0,0,0,0.5)] sm:rounded-2xl">
+            <div className="pointer-events-none overflow-hidden rounded-xl border border-white/[0.08] bg-[#1a1a1f] shadow-[0_8px_32px_rgba(0,0,0,0.5)] sm:rounded-2xl">
               <div
                 className={cn(
                   "relative",
@@ -754,7 +761,7 @@ export function LiveCallRoom({
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
 
           {/* ── Control bar ────────────────────────────────── */}
           <div

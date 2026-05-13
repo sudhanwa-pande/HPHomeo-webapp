@@ -60,7 +60,6 @@ import {
   DoctorInfoCard,
   PrescriptionReceiptPreview,
   SlotPicker,
-  StickyActionBar,
 } from "@/components/appointment";
 import { ReminderSettings } from "@/components/appointment/reminder-settings";
 import { PatientNotes } from "@/components/appointment/patient-notes";
@@ -98,10 +97,10 @@ function InfoItem({
 
 /* ── Tab content fade ── */
 const tabFade = {
-  initial: { opacity: 0, y: 6 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -4 },
-  transition: { duration: 0.2 },
+  initial: { opacity: 0, y: 10, scale: 0.98 },
+  animate: { opacity: 1, y: 0, scale: 1 },
+  exit: { opacity: 0, y: -10, scale: 0.98 },
+  transition: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
 };
 
 /* ── Main ── */
@@ -237,11 +236,11 @@ function AppointmentDetailContent() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               {/* Left: Doctor + appointment info */}
               <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/80 shadow-sm ring-1 ring-gray-100">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[1.2rem] bg-gradient-to-br from-white to-gray-50 shadow-sm ring-1 ring-black/5">
                   {apt.mode === "online" ? (
-                    <MonitorPlay className="h-5 w-5 text-brand" />
+                    <MonitorPlay className="h-6 w-6 text-brand" />
                   ) : (
-                    <MapPin className="h-5 w-5 text-gray-500" />
+                    <MapPin className="h-6 w-6 text-gray-500" />
                   )}
                 </div>
                 <div>
@@ -267,17 +266,19 @@ function AppointmentDetailContent() {
               {/* Right: Consolidated action buttons */}
               <div className="flex flex-wrap items-center gap-2">
                 {joinable && (
-                  <Button
-                    onClick={() =>
-                      router.push(
-                        `/patient/appointments/${apt.appointment_id}/waiting-room`,
-                      )
-                    }
-                    className="gap-1.5 rounded-xl bg-emerald-600 shadow-sm shadow-emerald-600/15 hover:bg-emerald-700"
-                  >
-                    <Video className="h-4 w-4" />
-                    Join Call
-                  </Button>
+                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    <Button
+                      onClick={() =>
+                        router.push(
+                          `/patient/appointments/${apt.appointment_id}/waiting-room`,
+                        )
+                      }
+                      className="h-11 gap-2 rounded-xl bg-emerald-500 px-6 font-semibold text-white shadow-[0_8px_24px_rgba(16,185,129,0.3)] hover:bg-emerald-600"
+                    >
+                      <Video className="h-4 w-4" />
+                      Join Call
+                    </Button>
+                  </motion.div>
                 )}
                 {needsPay && (
                   <Button
@@ -378,20 +379,29 @@ function AppointmentDetailContent() {
         )}
 
         {/* ═══ Tab Navigation ═══ */}
-        <div className="flex gap-1 rounded-xl border border-gray-200/60 bg-white p-1">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setActiveTab(t.key)}
-              className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-all ${
-                activeTab === t.key
-                  ? "bg-gray-900 text-white shadow-sm"
-                  : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="relative flex w-full max-w-md gap-1 rounded-[1.2rem] bg-gray-100/80 p-1.5 backdrop-blur-md">
+          {tabs.map((t) => {
+            const isActive = activeTab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setActiveTab(t.key)}
+                className={cn(
+                  "relative flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors z-10",
+                  isActive ? "text-gray-900" : "text-gray-500 hover:text-gray-700"
+                )}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="activePatientTab"
+                    className="absolute inset-0 -z-10 rounded-xl bg-white shadow-sm"
+                    transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">{t.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* ═══ Tab Content ═══ */}
@@ -622,20 +632,6 @@ function AppointmentDetailContent() {
         </AnimatePresence>
       </div>
 
-      {/* Sticky bottom bar (mobile) */}
-      <StickyActionBar
-        appointment={apt}
-        onJoinCall={() =>
-          router.push(
-            `/patient/appointments/${apt.appointment_id}/waiting-room`,
-          )
-        }
-        onPay={() => actions.paymentMutation.mutate(apt)}
-        onCancel={() => actions.openCancel(apt.appointment_id)}
-        onReschedule={() => actions.openReschedule(apt.appointment_id)}
-        isPaying={actions.paymentMutation.isPending}
-      />
-
       {/* Cancel Dialog */}
       <Dialog
         open={!!actions.cancellingId}
@@ -699,7 +695,7 @@ function AppointmentDetailContent() {
           if (!open) actions.closeReschedule();
         }}
       >
-        <DialogContent className="max-w-2xl rounded-2xl p-0">
+        <DialogContent className="max-w-2xl rounded-2xl p-0 max-h-[90vh] overflow-y-auto">
           <DialogHeader className="px-6 pt-6">
             <DialogTitle className="flex items-center gap-2">
               <CalendarClock className="h-5 w-5 text-brand" />

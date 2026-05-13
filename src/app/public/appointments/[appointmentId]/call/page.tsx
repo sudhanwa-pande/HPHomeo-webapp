@@ -203,16 +203,8 @@ function PublicCallPageClient() {
           return;
         }
 
-        const prepared = await prepareMediaChoices({
-          audio: wantsAudio,
-          video: wantsVideo,
-          preferredFacingMode: nextFacingMode,
-        });
-
-        setMediaPreferences({ audio: prepared.audio, video: prepared.video });
-        persistResumeState({ audio: prepared.audio, video: prepared.video }, nextFacingMode);
-
-        if (prepared.warning) notifyInfo("Joining with available devices", prepared.warning);
+        setMediaPreferences({ audio: wantsAudio, video: wantsVideo });
+        persistResumeState({ audio: wantsAudio, video: wantsVideo }, nextFacingMode);
 
         const { data } = await publicApi.post<VideoTokenResponse>(
           `/public/appointments/${appointmentId}/video-token`,

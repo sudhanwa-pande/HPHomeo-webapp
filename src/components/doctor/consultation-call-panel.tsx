@@ -352,23 +352,20 @@ export function ConsultationCallPanel({
             onPointerUp={handleDragPointerUp}
             onPointerCancel={handleDragPointerUp}
             className={cn(
-              "flex h-9 select-none items-center gap-2 border-b border-white/[0.07] px-3",
-              isDragging ? "cursor-grabbing" : "cursor-grab",
+              "absolute inset-x-0 top-0 z-10 flex h-10 select-none touch-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
+              isDragging ? "cursor-grabbing opacity-100" : "cursor-grab opacity-0 hover:opacity-100",
             )}
             onClick={(e) => e.stopPropagation()}
           >
-            <GripHorizontal className="h-3.5 w-3.5 shrink-0 text-white/30" />
-            <span className="flex-1 truncate text-[10px] font-bold uppercase tracking-wide text-white/50">
-              {appointment.patient.full_name}
-            </span>
+            <GripHorizontal className="h-4 w-4 shrink-0 text-white/60 drop-shadow-md" />
             <button
               onClick={() => {
                 hapticTap();
                 if (onMaximize) onMaximize();
               }}
-              className="flex h-6 w-6 items-center justify-center rounded-md bg-white/[0.08] text-white/60 hover:bg-white/[0.15] hover:text-white"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30"
             >
-              <Maximize2 className="h-3 w-3" />
+              <Maximize2 className="h-3.5 w-3.5" />
             </button>
           </div>
         )}
@@ -428,109 +425,103 @@ export function ConsultationCallPanel({
         </span>
       </div>
 
-      <div className="bg-[#111113] p-4 text-white">
+      <div className="bg-[#050505] p-5 text-white">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[15px] font-semibold">{appointment.patient.full_name}</p>
-            <p className="mt-0.5 text-xs text-white/40">
+            <p className="text-lg font-bold">{appointment.patient.full_name}</p>
+            <p className="mt-1 text-xs text-white/50">
               {format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy - hh:mm a")}
             </p>
           </div>
-          <div className="rounded-full bg-white/[0.06] px-2.5 py-1 text-[10px] font-medium text-white/50">
+          <div className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white/80 backdrop-blur-md shadow-sm">
             {appointment.call_status === "waiting" ||
             appointment.call_status === "connected" ||
             appointment.call_status === "disconnected"
               ? "Resume ready"
-              : "Ready"}
+              : "Ready to join"}
           </div>
         </div>
 
-        <div className="mt-4 grid gap-2">
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <button
             type="button"
             onClick={() => setMediaPreferences((c) => ({ ...c, video: !c.video }))}
             className={cn(
-              "flex items-center gap-3 rounded-xl border p-3 text-left transition",
+              "flex flex-1 items-center gap-3 rounded-[1.2rem] border px-4 py-3.5 transition-all duration-200",
               mediaPreferences.video
-                ? "border-brand/20 bg-brand/[0.08]"
-                : "border-white/[0.06] bg-white/[0.03]",
+                ? "border-brand/30 bg-brand/10 shadow-[0_4px_16px_rgba(88,155,255,0.1)]"
+                : "border-white/10 bg-white/5 hover:bg-white/10",
             )}
           >
             <div
               className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full",
-                mediaPreferences.video ? "bg-brand text-white" : "bg-white/[0.06] text-white/40",
+                "flex h-10 w-10 items-center justify-center rounded-full transition-colors",
+                mediaPreferences.video ? "bg-brand text-white" : "bg-white/10 text-white/50",
               )}
             >
               {mediaPreferences.video ? (
-                <Camera className="h-3.5 w-3.5" />
+                <Camera className="h-4 w-4" />
               ) : (
-                <CameraOff className="h-3.5 w-3.5" />
+                <CameraOff className="h-4 w-4" />
               )}
             </div>
-            <span className="flex-1 text-sm font-medium text-white/80">Camera</span>
-            <span
-              className={cn(
-                "text-[10px] font-semibold",
-                mediaPreferences.video ? "text-brand" : "text-white/30",
-              )}
-            >
-              {mediaPreferences.video ? "ON" : "OFF"}
-            </span>
+            <div className="flex-1 text-left">
+              <span className="block text-sm font-semibold text-white">Camera</span>
+              <span className="block text-[11px] font-medium text-white/50">
+                {mediaPreferences.video ? "Enabled" : "Disabled"}
+              </span>
+            </div>
           </button>
           <button
             type="button"
             onClick={() => setMediaPreferences((c) => ({ ...c, audio: !c.audio }))}
             className={cn(
-              "flex items-center gap-3 rounded-xl border p-3 text-left transition",
+              "flex flex-1 items-center gap-3 rounded-[1.2rem] border px-4 py-3.5 transition-all duration-200",
               mediaPreferences.audio
-                ? "border-brand/20 bg-brand/[0.08]"
-                : "border-white/[0.06] bg-white/[0.03]",
+                ? "border-brand/30 bg-brand/10 shadow-[0_4px_16px_rgba(88,155,255,0.1)]"
+                : "border-white/10 bg-white/5 hover:bg-white/10",
             )}
           >
             <div
               className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full",
-                mediaPreferences.audio ? "bg-brand text-white" : "bg-white/[0.06] text-white/40",
+                "flex h-10 w-10 items-center justify-center rounded-full transition-colors",
+                mediaPreferences.audio ? "bg-brand text-white" : "bg-white/10 text-white/50",
               )}
             >
               {mediaPreferences.audio ? (
-                <Mic className="h-3.5 w-3.5" />
+                <Mic className="h-4 w-4" />
               ) : (
-                <MicOff className="h-3.5 w-3.5" />
+                <MicOff className="h-4 w-4" />
               )}
             </div>
-            <span className="flex-1 text-sm font-medium text-white/80">Microphone</span>
-            <span
-              className={cn(
-                "text-[10px] font-semibold",
-                mediaPreferences.audio ? "text-brand" : "text-white/30",
-              )}
-            >
-              {mediaPreferences.audio ? "ON" : "OFF"}
-            </span>
+            <div className="flex-1 text-left">
+              <span className="block text-sm font-semibold text-white">Microphone</span>
+              <span className="block text-[11px] font-medium text-white/50">
+                {mediaPreferences.audio ? "Enabled" : "Disabled"}
+              </span>
+            </div>
           </button>
         </div>
 
         {joinError ? (
-          <div className="mt-3 rounded-xl border border-red-500/15 bg-red-500/[0.07] p-3 text-sm">
-            <p className="font-medium text-red-300">Media issue</p>
-            <p className="mt-0.5 text-red-300/60">{joinError}</p>
+          <div className="mt-4 rounded-[1rem] border border-red-500/20 bg-red-500/10 p-3.5 text-sm backdrop-blur-md">
+            <p className="font-semibold text-red-400">Media access issue</p>
+            <p className="mt-1 text-red-400/80 leading-relaxed">{joinError}</p>
           </div>
         ) : null}
 
-        <div className="mt-4 grid gap-2">
+        <div className="mt-6 flex flex-col gap-3">
           <Button
-            className="h-12 rounded-xl bg-brand text-sm font-semibold text-white hover:bg-brand/90"
+            className="h-14 rounded-[1.2rem] bg-brand text-sm font-bold text-white shadow-[0_8px_32px_rgba(88,155,255,0.3)] transition-all hover:-translate-y-0.5 hover:bg-brand/90 hover:shadow-[0_12px_40px_rgba(88,155,255,0.4)]"
             loading={joining}
             onClick={() => void joinCall()}
           >
-            <Phone className="h-4 w-4" />
+            <Phone className="h-5 w-5 mr-2" />
             {consultationLabel}
           </Button>
           <Button
             variant="outline"
-            className="h-11 rounded-xl border-white/[0.08] bg-transparent text-sm text-white/60 hover:bg-white/[0.06] hover:text-white"
+            className="h-12 rounded-[1.2rem] border-white/10 bg-transparent text-sm font-medium text-white/60 transition-colors hover:bg-white/5 hover:text-white"
             disabled={joining}
             onClick={() => void joinCall({ audio: false, video: false })}
           >
@@ -816,11 +807,11 @@ function CallRoomContent({
           )}
 
           {/* Status overlay */}
-          <div className="absolute left-3 top-3 flex items-center gap-2">
-            <div className="flex items-center gap-1.5 rounded-lg bg-black/40 px-2.5 py-1.5 text-[11px] font-medium text-white/70 backdrop-blur-md">
+          <div className="absolute left-4 top-4 flex items-center gap-2">
+            <div className="flex items-center gap-2 rounded-xl bg-black/50 px-3 py-2 text-xs font-semibold text-white/90 backdrop-blur-md shadow-sm">
               <span
                 className={cn(
-                  "h-1.5 w-1.5 rounded-full",
+                  "h-2 w-2 rounded-full",
                   isConnected && hasRemote
                     ? "bg-emerald-400"
                     : isConnected
@@ -833,7 +824,7 @@ function CallRoomContent({
           </div>
 
           {/* Local PiP */}
-          <div className="absolute bottom-3 right-3 w-[120px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#1a1a1f] shadow-lg">
+          <div className="absolute right-4 top-4 w-[100px] overflow-hidden rounded-[1rem] border border-white/20 bg-black/60 shadow-2xl backdrop-blur-sm sm:w-[140px]">
             <div className="aspect-[3/4]">
               {localVideoTrack ? (
                 <VideoTrack
@@ -843,123 +834,130 @@ function CallRoomContent({
                 />
               ) : (
                 <div className="flex h-full items-center justify-center">
-                  <CameraOff className="h-5 w-5 text-white/20" />
+                  <CameraOff className="h-6 w-6 text-white/30" />
                 </div>
               )}
             </div>
             <div className="absolute bottom-1.5 left-1.5">
               <div
                 className={cn(
-                  "flex h-5 w-5 items-center justify-center rounded-full",
-                  isMicrophoneEnabled ? "bg-black/40 backdrop-blur-sm" : "bg-red-500/90",
+                  "flex h-6 w-6 items-center justify-center rounded-full shadow-sm",
+                  isMicrophoneEnabled ? "bg-black/60 backdrop-blur-md" : "bg-red-500",
                 )}
               >
                 {isMicrophoneEnabled ? (
-                  <Mic className="h-2.5 w-2.5 text-white/80" />
+                  <Mic className="h-3 w-3 text-white" />
                 ) : (
-                  <MicOff className="h-2.5 w-2.5 text-white" />
+                  <MicOff className="h-3 w-3 text-white" />
                 )}
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Controls */}
-        <div className="flex items-center justify-center gap-2 px-3 py-2.5 backdrop-blur-sm sm:gap-3 sm:px-4 sm:py-3">
-          <button
-            type="button"
-            onClick={() => void toggleMic()}
-            className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-full transition",
-              isMicrophoneEnabled
-                ? "bg-white/[0.10] text-white hover:bg-white/[0.16]"
-                : "bg-red-500/90 text-white hover:bg-red-500",
-            )}
-          >
-            {isMicrophoneEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-          </button>
-          <button
-            type="button"
-            onClick={() => void toggleCamera()}
-            className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-full transition",
-              Boolean(localVideoTrack)
-                ? "bg-white/[0.10] text-white hover:bg-white/[0.16]"
-                : "bg-red-500/90 text-white hover:bg-red-500",
-            )}
-          >
-            {Boolean(localVideoTrack) ? (
-              <Camera className="h-4 w-4" />
-            ) : (
-              <CameraOff className="h-4 w-4" />
-            )}
-          </button>
+          {/* Controls Overlay Bottom */}
+          <div className="absolute inset-x-0 bottom-4 flex justify-center pointer-events-none">
+            <div className="flex items-center justify-center gap-3 rounded-[2rem] bg-black/60 px-5 py-3 backdrop-blur-xl pointer-events-auto shadow-[0_16px_40px_rgba(0,0,0,0.5)] border border-white/10">
+              <button
+                type="button"
+                onClick={() => void toggleMic()}
+                className={cn(
+                  "flex h-12 w-12 items-center justify-center rounded-full transition-transform hover:scale-105 active:scale-95",
+                  isMicrophoneEnabled
+                    ? "bg-white/10 text-white hover:bg-white/20"
+                    : "bg-red-500 text-white shadow-[0_4px_16px_rgba(239,68,68,0.4)]",
+                )}
+              >
+                {isMicrophoneEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => void toggleCamera()}
+                className={cn(
+                  "flex h-12 w-12 items-center justify-center rounded-full transition-transform hover:scale-105 active:scale-95",
+                  Boolean(localVideoTrack)
+                    ? "bg-white/10 text-white hover:bg-white/20"
+                    : "bg-red-500 text-white shadow-[0_4px_16px_rgba(239,68,68,0.4)]",
+                )}
+              >
+                {Boolean(localVideoTrack) ? (
+                  <Camera className="h-5 w-5" />
+                ) : (
+                  <CameraOff className="h-5 w-5" />
+                )}
+              </button>
 
-          <button
-            type="button"
-            onClick={() =>
-              setChatOpen((c) => {
-                const next = !c;
-                if (next) setUnreadMessages(0);
-                return next;
-              })
-            }
-            className={cn(
-              "relative flex h-10 w-10 items-center justify-center rounded-full transition",
-              chatOpen
-                ? "bg-white/[0.14] text-white"
-                : "bg-white/[0.08] text-white/60 hover:bg-white/[0.12]",
-            )}
-          >
-            <MessageSquare className="h-4 w-4" />
-            {unreadMessages > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[9px] font-bold text-white">
-                {unreadMessages > 9 ? "9+" : unreadMessages}
-              </span>
-            ) : null}
-          </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setChatOpen((c) => {
+                    const next = !c;
+                    if (next) setUnreadMessages(0);
+                    return next;
+                  })
+                }
+                className={cn(
+                  "relative flex h-12 w-12 items-center justify-center rounded-full transition-transform hover:scale-105 active:scale-95",
+                  chatOpen
+                    ? "bg-white/20 text-white"
+                    : "bg-white/10 text-white hover:bg-white/20",
+                )}
+              >
+                <MessageSquare className="h-5 w-5" />
+                {unreadMessages > 0 ? (
+                  <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1.5 text-[10px] font-bold text-white shadow-md">
+                    {unreadMessages > 9 ? "9+" : unreadMessages}
+                  </span>
+                ) : null}
+              </button>
 
-          <div className="mx-1 h-6 w-px bg-white/[0.08]" />
+              <div className="mx-2 h-8 w-px bg-white/20" />
 
-          <button
-            type="button"
-            className="flex h-10 items-center gap-2 rounded-full bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400 disabled:opacity-60"
-            disabled={endLoading}
-            onClick={() => {
-              hapticWarning();
-              setEndConfirmOpen(true);
-            }}
-          >
-            <PhoneOff className="h-4 w-4" />
-            <span className="hidden sm:inline">{endLabel}</span>
-          </button>
-        </div>
-
-        {/* End call confirmation bar */}
-        {endConfirmOpen && (
-          <div className="flex items-center justify-center gap-3 border-t border-white/[0.06] bg-[#1a1a1d] px-4 py-3">
-            <p className="text-xs font-medium text-white/60">End this consultation?</p>
-            <button
-              type="button"
-              className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/20"
-              onClick={() => setEndConfirmOpen(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-full bg-red-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-400 disabled:opacity-60"
-              disabled={endLoading}
-              onClick={() => {
-                hapticPulse();
-                setEndConfirmOpen(false);
-                onEnd();
-              }}
-            >
-              Yes, end call
-            </button>
+              <button
+                type="button"
+                className="flex h-12 items-center gap-2 rounded-full bg-red-500 px-5 text-[15px] font-bold text-white shadow-[0_8px_24px_rgba(239,68,68,0.4)] transition-all hover:bg-red-400 hover:scale-105 active:scale-95 disabled:opacity-60 disabled:hover:scale-100"
+                disabled={endLoading}
+                onClick={() => {
+                  hapticWarning();
+                  setEndConfirmOpen(true);
+                }}
+              >
+                <PhoneOff className="h-5 w-5" />
+                <span className="hidden sm:inline">{endLabel}</span>
+              </button>
+            </div>
           </div>
-        )}
+
+          {/* End call confirmation bar (Overlaid) */}
+          {endConfirmOpen && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm">
+              <div className="rounded-[2rem] border border-white/10 bg-[#1a1a1d] px-8 py-6 text-center shadow-2xl">
+                <p className="text-lg font-bold text-white">End this consultation?</p>
+                <p className="mt-2 text-sm text-white/60">This action cannot be undone.</p>
+                <div className="mt-6 flex gap-3">
+                  <button
+                    type="button"
+                    className="flex-1 rounded-[1.2rem] bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20"
+                    onClick={() => setEndConfirmOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-1 rounded-[1.2rem] bg-red-500 px-6 py-3 text-sm font-bold text-white shadow-[0_8px_24px_rgba(239,68,68,0.4)] transition hover:bg-red-400 disabled:opacity-60"
+                    disabled={endLoading}
+                    onClick={() => {
+                      hapticPulse();
+                      setEndConfirmOpen(false);
+                      onEnd();
+                    }}
+                  >
+                    Yes, end call
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Chat */}
