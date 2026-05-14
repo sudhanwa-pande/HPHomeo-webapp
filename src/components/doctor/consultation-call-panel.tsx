@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion, useDragControls } from "framer-motion";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -65,44 +66,6 @@ function formatConnectionLabel(connectionState: ConnectionState, remoteCount: nu
   return "Offline";
 }
 
-/* ─── Drag position helpers ─────────────────────────────────────── */
-
-const PIP_WIDTH_SM = 320; // matches sm:w-[320px]
-const PIP_MARGIN = 16;    // gap from viewport edge
-const PIP_MARGIN_BOTTOM_MOBILE = 80; // bottom-20 equivalent — avoids gesture areas on mobile
-
-function getDefaultPos(el?: HTMLDivElement | null): { x: number; y: number } {
-  if (typeof window === "undefined") return { x: 0, y: 0 };
-  const elW = el?.offsetWidth ?? (window.innerWidth < 640 ? 200 : PIP_WIDTH_SM);
-  const elH = el?.offsetHeight ?? (window.innerWidth < 640 ? 150 : 252);
-  
-  // On mobile, default to top-right to avoid keyboard overlap by default
-  if (window.innerWidth < 640) {
-    return {
-      x: window.innerWidth - elW - PIP_MARGIN,
-      y: PIP_MARGIN + 60, // below header
-    };
-  }
-  
-  return {
-    x: window.innerWidth - elW - PIP_MARGIN,
-    y: window.innerHeight - elH - PIP_MARGIN,
-  };
-}
-
-function clampPos(
-  x: number,
-  y: number,
-  elW: number,
-  elH: number,
-): { x: number; y: number } {
-  if (typeof window === "undefined") return { x, y };
-  return {
-    x: Math.max(PIP_MARGIN, Math.min(x, window.innerWidth - elW - PIP_MARGIN)),
-    y: Math.max(PIP_MARGIN, Math.min(y, window.innerHeight - elH - PIP_MARGIN)),
-  };
-}
-
 /* ─── Main component ────────────────────────────────────────────── */
 
 export function ConsultationCallPanel({
@@ -126,106 +89,152 @@ export function ConsultationCallPanel({
     video: true,
   });
 
-  /* ── Drag state ── */
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  /* ── Adaptive PiP State ── */
+  const dragControls = useDragControls();
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{
-    px: number;
-    py: number;
-    ox: number;
-    oy: number;
-  } | null>(null);
+  const [isPeeking, setIsPeeking] = useState(false);
+  const [bounds, setBounds] = useState({ top: 0, left: 0, right: 0, bottom: 0 });
+  
+  const peekTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const peekStartedAtRef = useRef<number>(0);
+  const lastUserYRef = useRef<number | null>(null);
+  const wasInBottomHalfRef = useRef<boolean>(false);
+  const interactionState = useRef<"idle" | "dragging" | "peeking">("idle");
+  const maxVvHeightRef = useRef<number>(0);
 
-  // Initialize position to bottom-right when minimized is first true
-  useEffect(() => {
-    if (minimized && pos === null && typeof window !== "undefined") {
-      setPos(getDefaultPos(containerRef.current));
-    }
-  }, [minimized]); // intentionally omit `pos` to avoid re-init on moves
-
-  // Clamp to viewport (memoized)
-  const clamp = useCallback((x: number, y: number) => {
-    const el = containerRef.current;
-    const elW = el?.offsetWidth ?? (window.innerWidth < 640 ? 200 : PIP_WIDTH_SM);
-    const elH = el?.offsetHeight ?? (window.innerWidth < 640 ? 150 : 252);
-    
-    if (typeof window === "undefined") return { x, y };
-    
-    // Use Visual Viewport API to account for keyboard on mobile
+  const calculateBounds = useCallback((width: number) => {
+    if (typeof window === "undefined") return { top: 0, left: 0, right: 0, bottom: 0 };
     const vv = window.visualViewport;
-    const viewW = vv ? vv.width : window.innerWidth;
-    const viewH = vv ? vv.height : window.innerHeight;
-    const offsetLeft = vv ? vv.offsetLeft : 0;
-    const offsetTop = vv ? vv.offsetTop : 0;
-
+    const vW = vv?.width || window.innerWidth;
+    const vH = vv?.height || window.innerHeight;
+    const oT = vv?.offsetTop || 0;
+    const oL = vv?.offsetLeft || 0;
     return {
-      x: Math.max(offsetLeft + PIP_MARGIN, Math.min(x, offsetLeft + viewW - elW - PIP_MARGIN)),
-      y: Math.max(offsetTop + PIP_MARGIN, Math.min(y, offsetTop + viewH - elH - PIP_MARGIN)),
+      top: Math.max(oT + 16, window.innerHeight > window.innerWidth ? 48 : 16),
+      left: oL + 16,
+      right: oL + vW - width - 16,
+      bottom: oT + vH - (width * 0.75 + 40) - 16, 
     };
   }, []);
 
-  // Re-clamp when visual viewport changes (keyboard show/hide, zoom, resize)
+  // Clear timers on unmount
   useEffect(() => {
-    if (!minimized) return;
-    const vv = window.visualViewport;
-    const onVVChange = () => setPos((p) => (p ? clamp(p.x, p.y) : p));
-    
-    if (vv) {
-      vv.addEventListener("resize", onVVChange);
-      vv.addEventListener("scroll", onVVChange);
-    }
-    window.addEventListener("resize", onVVChange);
-    
     return () => {
-      if (vv) {
-        vv.removeEventListener("resize", onVVChange);
-        vv.removeEventListener("scroll", onVVChange);
+      if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+    };
+  }, []);
+
+  const handlePeek = () => {
+    if (!isKeyboardOpen) return; // Only peek if currently shrunk
+    if (interactionState.current === "dragging") return; // Prevent mid-drag triggers
+    interactionState.current = "peeking";
+    setIsPeeking(true);
+    peekStartedAtRef.current = Date.now();
+    setBounds(calculateBounds(200)); // Atomically update bounds
+
+    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+    peekTimerRef.current = setTimeout(() => {
+      // Bulletproof background race prevention
+      if (Date.now() - peekStartedAtRef.current >= 2400) {
+        setIsPeeking(false);
+        setBounds(calculateBounds(140)); // Sync bounds atomically
+        if (interactionState.current === "peeking") {
+          interactionState.current = "idle";
+        }
       }
-      window.removeEventListener("resize", onVVChange);
-    };
-  }, [minimized, clamp]);
+    }, 2500); // 2.5s base, resets on tap
+  };
 
-  // Block text selection on body while dragging (prevents selecting prescription text)
+  // App lifecycle handling (visibility, lock screen, app switch)
   useEffect(() => {
-    if (!isDragging) return;
-    const prev = document.body.style.userSelect;
-    document.body.style.userSelect = "none";
-    return () => {
-      document.body.style.userSelect = prev;
+    if (typeof document === "undefined") return;
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+        setIsPeeking(false);
+        setIsKeyboardOpen(false);
+        setBounds(calculateBounds(180));
+        lastUserYRef.current = null;
+        interactionState.current = "idle";
+      }
     };
-  }, [isDragging]);
-
-  const handleDragPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (e.button !== 0) return; // left pointer only
-      e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId); // capture so move fires even off-element
-      dragStartRef.current = {
-        px: e.clientX,
-        py: e.clientY,
-        ox: pos?.x ?? 0,
-        oy: pos?.y ?? 0,
-      };
-      setIsDragging(true);
-    },
-    [pos],
-  );
-
-  const handleDragPointerMove = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!dragStartRef.current) return;
-      const dx = e.clientX - dragStartRef.current.px;
-      const dy = e.clientY - dragStartRef.current.py;
-      setPos(clamp(dragStartRef.current.ox + dx, dragStartRef.current.oy + dy));
-    },
-    [clamp],
-  );
-
-  const handleDragPointerUp = useCallback(() => {
-    dragStartRef.current = null;
-    setIsDragging(false);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", onVisibilityChange);
+    };
   }, []);
+
+  // Orientation change = cancel peek mode and reset safe defaults
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOrientationChange = () => {
+      if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+      setIsPeeking(false);
+      setIsKeyboardOpen(false);
+      setBounds(calculateBounds(180));
+      lastUserYRef.current = null; // Clears manual drag memory so it safely snaps
+      interactionState.current = "idle";
+      
+      // Reset max to prevent drift
+      if (window.visualViewport) {
+        maxVvHeightRef.current = window.visualViewport.height || window.innerHeight;
+      }
+    };
+    window.addEventListener("orientationchange", onOrientationChange);
+    return () => window.removeEventListener("orientationchange", onOrientationChange);
+  }, []);
+
+  // Keyboard detection (hybrid with debounce) & Atomic bounds recalculation
+  useEffect(() => {
+    if (!minimized || typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    if (maxVvHeightRef.current === 0) {
+      maxVvHeightRef.current = vv.height;
+    }
+
+    let timeoutId: NodeJS.Timeout;
+
+    const onResize = () => {
+      if (vv.height > maxVvHeightRef.current) {
+        maxVvHeightRef.current = vv.height;
+      }
+
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        // Hybrid check: maxVvHeight minus visual viewport safely detects keyboard on iOS Safari
+        const keyboardOpen = maxVvHeightRef.current - vv.height > 150;
+        const willBePeeking = keyboardOpen ? isPeeking : false;
+        
+        setIsKeyboardOpen(keyboardOpen);
+        if (!keyboardOpen) setIsPeeking(false);
+        
+        // 1. Update bounds FIRST (atomically batched with state updates)
+        // 2. Framer motion applies dragConstraints 
+        // 3. Animation begins to new x/y safely without jumps
+        const nextPipWidth = willBePeeking ? 200 : keyboardOpen ? 140 : 180;
+        setBounds(calculateBounds(nextPipWidth));
+      }, 200); // 200ms debounce prevents jitter during Android keyboard animation
+    };
+
+    vv.addEventListener("resize", onResize);
+    vv.addEventListener("scroll", onResize);
+    // Initial bounds sync
+    onResize();
+
+    return () => {
+      clearTimeout(timeoutId);
+      vv.removeEventListener("resize", onResize);
+      vv.removeEventListener("scroll", onResize);
+    };
+  }, [minimized, isPeeking, calculateBounds]);
+
+  // Dimensions
+  const pipWidth = isPeeking ? 200 : isKeyboardOpen ? 140 : 180;
 
   /* ── Call logic ── */
   const canStartConsultation =
@@ -319,59 +328,9 @@ export function ConsultationCallPanel({
 
   // Active call — layout adapts via `minimized`
   if (tokenData) {
-    return (
-      <div
-        ref={containerRef}
-        style={
-          minimized && pos
-            ? { left: pos.x, top: pos.y }
-            : undefined
-        }
-        className={cn(
-          "overflow-hidden rounded-2xl",
-          minimized
-            ? cn(
-                "fixed z-50 w-[200px] border bg-[#111113] sm:w-[320px]",
-                // Elevated shadow + ring during drag for visual feedback
-                isDragging
-                  ? "cursor-grabbing border-brand/40 opacity-75 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)]"
-                  : "cursor-default border-white/10 shadow-[0_12px_48px_rgba(0,0,0,0.5)]",
-                // Smooth position transition only when NOT dragging (for snap/resize)
-                !isDragging && "transition-[left,top,opacity] duration-300 ease-out",
-                // Hide until position is computed (prevents SSR/top-left flash)
-                !pos && "invisible",
-              )
-            : "border border-gray-200/60 bg-white transition-all duration-300",
-        )}
-      >
-        {/* ── Drag handle (minimized only) ───────────────────────── */}
-        {minimized && (
-          <div
-            onPointerDown={handleDragPointerDown}
-            onPointerMove={handleDragPointerMove}
-            onPointerUp={handleDragPointerUp}
-            onPointerCancel={handleDragPointerUp}
-            className={cn(
-              "absolute inset-x-0 top-0 z-10 flex h-10 select-none touch-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
-              isDragging ? "cursor-grabbing opacity-100" : "cursor-grab opacity-0 hover:opacity-100",
-            )}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <GripHorizontal className="h-4 w-4 shrink-0 text-white/60 drop-shadow-md" />
-            <button
-              onClick={() => {
-                hapticTap();
-                if (onMaximize) onMaximize();
-              }}
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30"
-            >
-              <Maximize2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
-
-        {/* ── Full-size header (not minimized) ───────────────────── */}
-        {!minimized && (
+    if (!minimized) {
+      return (
+        <div className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white transition-all duration-300">
           <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
             <div>
               <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
@@ -381,7 +340,123 @@ export function ConsultationCallPanel({
               In call
             </span>
           </div>
+
+          <LiveKitRoom
+            key={appointmentId}
+            serverUrl={tokenData.server_url}
+            token={tokenData.token}
+            connect
+            audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
+            video={buildPreferredVideoConstraints(mediaPreferences.video)}
+            options={LIVEKIT_ROOM_OPTIONS}
+            onMediaDeviceFailure={handleMediaDeviceFailure}
+            onDisconnected={handleDisconnected}
+          >
+            <CallRoomContent
+              minimized={false}
+              patientName={appointment.patient.full_name}
+              endLabel="End consultation"
+              endLoading={endCallMutation.isPending}
+              onEnd={() => endCallMutation.mutate()}
+              onMaximize={onMaximize}
+            />
+          </LiveKitRoom>
+        </div>
+      );
+    }
+
+    // Minimized (PiP) Layout with Framer Motion Physics
+    return (
+      <motion.div
+        role="dialog"
+        aria-label="Video call window"
+        drag
+        dragControls={dragControls}
+        dragListener={false} // Drag is explicitly handled by the grip icon only
+        dragMomentum={false}
+        dragElastic={0.05}
+        dragConstraints={bounds}
+        onDragStart={() => {
+          if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+          setIsPeeking(false);
+          interactionState.current = "dragging";
+          setIsDragging(true);
+        }}
+        onDragEnd={(e, info) => {
+          interactionState.current = "idle";
+          setIsDragging(false);
+          lastUserYRef.current = info.point.y;
+          wasInBottomHalfRef.current = info.point.y > (typeof window !== 'undefined' ? window.innerHeight / 2 : 500);
+          // Framer Motion internally clamps to dragConstraints if left out of bounds, 
+          // preventing the "slow session drift" without needing manual setPosition state!
+        }}
+        onClick={() => {
+          if (isDragging) return;
+          if (interactionState.current === "idle" || interactionState.current === "peeking") {
+             handlePeek();
+          }
+        }}
+        initial={false}
+        animate={{
+          width: pipWidth,
+          opacity: isKeyboardOpen && !isPeeking ? 0.85 : 1,
+          // Smart snap: only force PiP to top-right if user left it in the bottom half
+          x: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
+               ? bounds.right 
+               : undefined,
+          y: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
+               ? bounds.top 
+               : undefined,
+          scale: isDragging ? 1.02 : 1,
+        }}
+        transition={{
+          type: "spring",
+          stiffness: 300,
+          damping: 30,
+        }}
+        className={cn(
+          "fixed z-[1000] overflow-hidden rounded-2xl border touch-manipulation",
+          isDragging
+            ? "cursor-grabbing border-brand/40 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)] bg-[#111113]/90 backdrop-blur-md"
+            : "border-white/10",
+          !isDragging && (isKeyboardOpen && !isPeeking 
+             ? "bg-[#111113]/95 backdrop-blur-none shadow-lg" // Performance optimization for low-end Androids
+             : "bg-[#111113]/90 backdrop-blur-md shadow-2xl")
         )}
+        style={{
+          // Set initial fallback position on mount before framer-motion takes over
+          top: 0,
+          left: 0,
+          // Shift initial position out of view until constraints load, or snap to corner
+          x: bounds.right || (typeof window !== 'undefined' ? window.innerWidth - pipWidth - 16 : 0),
+          y: bounds.top || (typeof window !== 'undefined' && window.innerHeight > window.innerWidth ? 48 : 16),
+        }}
+      >
+        {/* ── Drag handle ───────────────────────── */}
+        <div
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dragControls.start(e);
+          }}
+          className={cn(
+            "absolute inset-x-0 top-0 z-10 flex h-10 touch-none select-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
+            isDragging || isKeyboardOpen ? "opacity-100" : "opacity-0 hover:opacity-100",
+            isDragging ? "cursor-grabbing" : "cursor-grab",
+          )}
+        >
+          <GripHorizontal className="h-4 w-4 shrink-0 text-white/60 drop-shadow-md" />
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              hapticTap();
+              if (onMaximize) onMaximize();
+            }}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+        </div>
 
         <LiveKitRoom
           key={appointmentId}
@@ -395,7 +470,7 @@ export function ConsultationCallPanel({
           onDisconnected={handleDisconnected}
         >
           <CallRoomContent
-            minimized={minimized}
+            minimized={true}
             patientName={appointment.patient.full_name}
             endLabel="End consultation"
             endLoading={endCallMutation.isPending}
@@ -403,7 +478,7 @@ export function ConsultationCallPanel({
             onMaximize={onMaximize}
           />
         </LiveKitRoom>
-      </div>
+      </motion.div>
     );
   }
 
@@ -744,19 +819,19 @@ function CallRoomContent({
 
         {/* End call confirmation overlay (minimized) */}
         {endConfirmOpen && (
-          <div className="flex flex-col items-center gap-2 bg-[#1a1a1d] px-3 py-3">
-            <p className="text-[11px] font-medium text-white/60">End this call?</p>
-            <div className="flex gap-2">
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#1a1a1d]/95 backdrop-blur-sm px-3 py-3">
+            <p className="mb-2 text-[12px] font-bold text-white">End this call?</p>
+            <div className="flex w-full gap-2">
               <button
                 type="button"
-                className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white/70 transition hover:bg-white/20"
+                className="flex-1 rounded-full bg-white/10 py-2 text-[11px] font-medium text-white/70 transition hover:bg-white/20"
                 onClick={(e) => { e.stopPropagation(); setEndConfirmOpen(false); }}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="rounded-full bg-red-500 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-red-400 disabled:opacity-60"
+                className="flex-1 rounded-full bg-red-500 py-2 text-[11px] font-semibold text-white transition hover:bg-red-400 disabled:opacity-60"
                 disabled={endLoading}
                 onClick={(e) => {
                   e.stopPropagation();

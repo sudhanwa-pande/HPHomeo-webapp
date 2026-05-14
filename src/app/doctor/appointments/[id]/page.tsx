@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
@@ -38,6 +38,8 @@ import { hapticPulse, hapticSuccess, hapticTap, hapticWarning } from "@/lib/hapt
 import { notifyApiError, notifyError, notifyInfo, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { AuthGuard } from "@/components/auth-guard";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
+import { IsolatedInput } from "@/components/ui/isolated-input";
 import { DoctorShell } from "@/components/doctor/doctor-shell";
 import { StatusBadge } from "@/components/doctor/ui";
 import { ConsultationCallPanel } from "@/components/doctor/consultation-call-panel";
@@ -229,6 +231,54 @@ function DetailContent() {
   const [saveTemplateDialogOpen, setSaveTemplateDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [completionCelebration, setCompletionCelebration] = useState(false);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewAbortRef = useRef<AbortController | null>(null);
+
+  // Clean up blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+      if (previewAbortRef.current) previewAbortRef.current.abort();
+    };
+  }, [previewBlobUrl]);
+
+  // Performance & UX states
+  const headerRef = useRef<HTMLDivElement>(null);
+  const handleTypingStateChange = useCallback((typing: boolean) => {
+    if (!headerRef.current) return;
+    if (typing) {
+      headerRef.current.classList.remove("bg-white/80", "backdrop-blur-lg");
+      headerRef.current.classList.add("bg-white");
+    } else {
+      headerRef.current.classList.add("bg-white/80", "backdrop-blur-lg");
+      headerRef.current.classList.remove("bg-white");
+    }
+  }, []);
+  const [keyboardSpacerHeight, setKeyboardSpacerHeight] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    
+    // Track max height to infer keyboard
+    let maxHeight = vv.height;
+    const lastSpacerHeightRef = useRef(0);
+    
+    const handleResize = () => {
+      if (vv.height > maxHeight) maxHeight = vv.height;
+      const keyboardHeight = Math.max(0, maxHeight - vv.height - 10);
+      
+      const newSpacerHeight = keyboardHeight > 100 ? keyboardHeight : 0;
+      if (Math.abs(newSpacerHeight - lastSpacerHeightRef.current) > 50) {
+        lastSpacerHeightRef.current = newSpacerHeight;
+        setKeyboardSpacerHeight(newSpacerHeight);
+      }
+    };
+
+    vv.addEventListener("resize", handleResize);
+    return () => vv.removeEventListener("resize", handleResize);
+  }, []);
 
   // Auto-save timer ref
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -319,6 +369,8 @@ function DetailContent() {
     [prescriptionData?.prescription],
   );
   const payload = draftPayload ?? serverPayload;
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
   const baseline = serverPayload;
   const isFinalized = prescription?.status === "final" && !prescription?.is_draft;
   const hasDraft = Boolean(prescription && prescription.is_draft);
@@ -453,21 +505,27 @@ function DetailContent() {
 
   const previewMutation = useMutation({
     mutationFn: async (nextPayload: PrescriptionPayload) => {
+      if (previewAbortRef.current) previewAbortRef.current.abort();
+      previewAbortRef.current = new AbortController();
+
       if (isFinalized) {
         return await api.get(
           `/doctor/appointments/${appointmentId}/prescription/pdf/view`,
-          { responseType: "blob" }
+          { responseType: "blob", signal: previewAbortRef.current.signal }
         ).then(res => res.data as Blob);
       }
       const response = await api.post(
         `/doctor/appointments/${appointmentId}/prescription/preview`,
         preparePayloadForApi(nextPayload),
-        { responseType: "blob" },
+        { responseType: "blob", signal: previewAbortRef.current.signal },
       );
       return response.data as Blob;
     },
     onSuccess: (blob) => {
-      openPdfBlob(blob);
+      if (previewAbortRef.current?.signal.aborted) return;
+      if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+      setPreviewBlobUrl(URL.createObjectURL(blob));
+      setPreviewOpen(true);
     },
     onError: (error) =>
       notifyApiError(error, "Couldn't build prescription preview"),
@@ -494,7 +552,7 @@ function DetailContent() {
 
   /* ── prescription field handlers ───────────────────────────────── */
 
-  const handleFieldChange = (
+  const handleFieldChange = useCallback((
     field: keyof Omit<PrescriptionPayload, "items">,
     value: string,
   ) => {
@@ -502,9 +560,9 @@ function DetailContent() {
       ...(current ?? serverPayload),
       [field]: value,
     }));
-  };
+  }, [serverPayload]);
 
-  const updateItem = (index: number, field: keyof RxItem, value: string) => {
+  const updateItem = useCallback((index: number, field: keyof RxItem, value: string) => {
     setDraftPayload((current) => {
       const source = current ?? serverPayload;
       return {
@@ -514,25 +572,25 @@ function DetailContent() {
         ),
       };
     });
-  };
+  }, [serverPayload]);
 
-  const addItem = () => {
+  const addItem = useCallback(() => {
     setDraftPayload((current) => {
       const source = current ?? serverPayload;
       return { ...source, items: [...source.items, { ...EMPTY_RX_ITEM }] };
     });
-  };
+  }, [serverPayload]);
 
-  const duplicateItem = (index: number) => {
+  const duplicateItem = useCallback((index: number) => {
     setDraftPayload((current) => {
       const source = current ?? serverPayload;
       const next = [...source.items];
       next.splice(index + 1, 0, { ...source.items[index] });
       return { ...source, items: next };
     });
-  };
+  }, [serverPayload]);
 
-  const removeItem = (index: number) => {
+  const removeItem = useCallback((index: number) => {
     setDraftPayload((current) => {
       const source = current ?? serverPayload;
       const next = source.items.filter((_, i) => i !== index);
@@ -541,30 +599,42 @@ function DetailContent() {
         items: next.length ? next : [{ ...EMPTY_RX_ITEM }],
       };
     });
-  };
+  }, [serverPayload]);
 
   const handleFinalize = async () => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    await Promise.resolve();
+    const latestPayload = payloadRef.current;
+
     if (!canManagePrescription) {
       notifyInfo("Unavailable", "Only confirmed/completed appointments can be finalized.");
       return;
     }
-    if (!hasMeaningfulPrescription(payload)) {
+    if (!hasMeaningfulPrescription(latestPayload)) {
       notifyError("Add details first", "Include at least one clinical or medication detail.");
       return;
     }
     if (!prescriptionExists || hasUnsavedChanges) {
-      await saveDraftMutation.mutateAsync(payload);
+      await saveDraftMutation.mutateAsync(latestPayload);
     }
     await finalizeMutation.mutateAsync();
     hapticSuccess();
   };
 
   const handleTogglePreview = async () => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    await Promise.resolve();
+    const latestPayload = payloadRef.current;
+
     if (!isFinalized && !canManagePrescription) {
       notifyInfo("Preview unavailable", "Only for confirmed/completed appointments.");
       return;
     }
-    await previewMutation.mutateAsync(payload);
+    await previewMutation.mutateAsync(latestPayload);
   };
 
   const applyTemplate = (template: PrescriptionTemplate) => {
@@ -662,7 +732,10 @@ function DetailContent() {
 
       <div className="space-y-0">
         {/* ─── Back button + compact header ────────────────────── */}
-        <div className="sticky top-[calc(64px-1px)] z-30 -mx-4 border-b border-border/10 bg-white/80 px-4 py-3 backdrop-blur-lg sm:-mx-5 sm:px-5 sm:py-4 lg:-mx-6 lg:px-6">
+        <div 
+          ref={headerRef}
+          className="sticky top-[calc(64px-1px)] z-30 -mx-4 border-b border-border/10 bg-white/80 px-4 py-3 backdrop-blur-lg sm:-mx-5 sm:px-5 sm:py-4 lg:-mx-6 lg:px-6 transition-all duration-200"
+        >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             {/* Row 1: Back + avatar + name + badges */}
             <div className="flex min-w-0 items-center gap-2 sm:gap-4">
@@ -895,44 +968,67 @@ function DetailContent() {
                   />
                 )}
                 {activeStep === "prescription" && (
-                  <PrescriptionSection
-                    appointment={apt}
-                    payload={payload}
-                    isFinalized={isFinalized}
-                    hasDraft={hasDraft}
-                    canManage={canManagePrescription}
-                    hasUnsavedChanges={hasUnsavedChanges}
-                    templates={templates}
-                    templateDialogOpen={templateDialogOpen}
-                    setTemplateDialogOpen={setTemplateDialogOpen}
-                    saveTemplateDialogOpen={saveTemplateDialogOpen}
-                    setSaveTemplateDialogOpen={setSaveTemplateDialogOpen}
-                    templateName={templateName}
-                    setTemplateName={setTemplateName}
-                    onFieldChange={handleFieldChange}
-                    onUpdateItem={updateItem}
-                    onAddItem={addItem}
-                    onDuplicateItem={duplicateItem}
-                    onRemoveItem={removeItem}
-                    onTogglePreview={handleTogglePreview}
-                    onFinalize={handleFinalize}
-                    onApplyTemplate={applyTemplate}
-                    onSaveTemplate={async () => {
-                      if (!templateName.trim()) {
-                        notifyError("Name required", "Give the template a name.");
-                        return;
-                      }
-                      if (!hasMeaningfulPrescription(payload)) {
-                        notifyError("Nothing to save", "Add content first.");
-                        return;
-                      }
-                      await saveTemplateMutation.mutateAsync(templateName.trim());
-                    }}
-                    finalizePending={finalizeMutation.isPending}
-                    previewPending={previewMutation.isPending}
-                    saveTemplatePending={saveTemplateMutation.isPending}
-                    autoSaveStatus={autoSaveStatus}
-                  />
+                  <>
+                    <PrescriptionSection
+                      appointment={apt}
+                      payload={payload}
+                      isFinalized={isFinalized}
+                      hasDraft={hasDraft}
+                      canManage={canManagePrescription}
+                      hasUnsavedChanges={hasUnsavedChanges}
+                      templates={templates}
+                      templateDialogOpen={templateDialogOpen}
+                      setTemplateDialogOpen={setTemplateDialogOpen}
+                      saveTemplateDialogOpen={saveTemplateDialogOpen}
+                      setSaveTemplateDialogOpen={setSaveTemplateDialogOpen}
+                      templateName={templateName}
+                      setTemplateName={setTemplateName}
+                      onFieldChange={handleFieldChange}
+                      onUpdateItem={updateItem}
+                      onAddItem={addItem}
+                      onDuplicateItem={duplicateItem}
+                      onRemoveItem={removeItem}
+                      onTogglePreview={handleTogglePreview}
+                      onFinalize={handleFinalize}
+                      onApplyTemplate={applyTemplate}
+                      onSaveTemplate={async () => {
+                        if (document.activeElement instanceof HTMLElement) {
+                          document.activeElement.blur();
+                        }
+                        await Promise.resolve();
+                        const latestPayload = payloadRef.current;
+                        if (!templateName.trim()) {
+                          notifyError("Name required", "Give the template a name.");
+                          return;
+                        }
+                        if (!hasMeaningfulPrescription(latestPayload)) {
+                          notifyError("Nothing to save", "Add content first.");
+                          return;
+                        }
+                        await saveTemplateMutation.mutateAsync(templateName.trim());
+                      }}
+                      finalizePending={finalizeMutation.isPending}
+                      previewPending={previewMutation.isPending}
+                      saveTemplatePending={saveTemplateMutation.isPending}
+                      autoSaveStatus={autoSaveStatus}
+                      setIsTyping={handleTypingStateChange}
+                    />
+                    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+                      <DialogContent className="max-w-4xl p-0 overflow-hidden sm:max-h-[90vh]">
+                        <DialogHeader className="px-4 py-3 border-b bg-brand-bg/50">
+                          <DialogTitle>Prescription Preview</DialogTitle>
+                        </DialogHeader>
+                        {previewBlobUrl && (
+                          <iframe src={previewBlobUrl} className="w-full h-[75vh]" />
+                        )}
+                        <DialogFooter className="px-4 py-3 border-t bg-brand-bg/50 sm:justify-end">
+                          <Button onClick={() => setPreviewOpen(false)} variant="outline">
+                            Close
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </>
                 )}
                 {activeStep === "complete" && (
                   <CompleteSection
@@ -951,6 +1047,16 @@ function DetailContent() {
                 )}
               </motion.div>
             </AnimatePresence>
+
+            {/* Dynamic Keyboard & PiP Spacer */}
+            <div 
+              style={{ 
+                height: keyboardSpacerHeight > 0 
+                  ? keyboardSpacerHeight + (apt.mode === "online" && activeStep !== "consultation" ? 160 : 0) 
+                  : 0 
+              }} 
+              className="w-full transition-all duration-150"
+            />
           </div>
         </div>
       </div>
@@ -1336,6 +1442,7 @@ function PrescriptionSection({
   previewPending,
   saveTemplatePending,
   autoSaveStatus,
+  setIsTyping,
 }: {
   appointment: DoctorAppointmentDetail;
   payload: PrescriptionPayload;
@@ -1366,6 +1473,7 @@ function PrescriptionSection({
   previewPending: boolean;
   saveTemplatePending: boolean;
   autoSaveStatus: "idle" | "saving" | "saved";
+  setIsTyping: (v: boolean) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -1485,32 +1593,32 @@ function PrescriptionSection({
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-brand-subtext/70">
                   Chief Complaints
                 </label>
-                <Textarea
+                <AutoResizeTextarea
                   rows={5}
                   value={payload.chief_complaints || ""}
-                  onChange={(e) =>
-                    onFieldChange("chief_complaints", e.target.value)
+                  onValueChange={(val) =>
+                    onFieldChange("chief_complaints", val)
                   }
+                  onTypingStateChange={(t) => setIsTyping(t)}
                   disabled={isFinalized || !canManage}
                   placeholder="Patient complaints and presenting symptoms."
-                  className="scroll-mt-24 rounded-xl"
-                  onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
+                  className="rounded-xl"
                 />
               </div>
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-brand-subtext/70">
                   Diagnosis
                 </label>
-                <Textarea
+                <AutoResizeTextarea
                   rows={5}
                   value={payload.diagnosis || ""}
-                  onChange={(e) =>
-                    onFieldChange("diagnosis", e.target.value)
+                  onValueChange={(val) =>
+                    onFieldChange("diagnosis", val)
                   }
+                  onTypingStateChange={(t) => setIsTyping(t)}
                   disabled={isFinalized || !canManage}
                   placeholder="Clinical diagnosis or impression."
-                  className="scroll-mt-24 rounded-xl"
-                  onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
+                  className="rounded-xl"
                 />
               </div>
             </div>
@@ -1543,9 +1651,9 @@ function PrescriptionSection({
                   item={item}
                   index={index}
                   disabled={isFinalized || !canManage}
-                  onUpdate={(field, value) => onUpdateItem(index, field, value)}
-                  onDuplicate={() => onDuplicateItem(index)}
-                  onRemove={() => onRemoveItem(index)}
+                  onUpdate={onUpdateItem}
+                  onDuplicate={onDuplicateItem}
+                  onRemove={onRemoveItem}
                 />
               ))}
             </div>
@@ -1566,14 +1674,14 @@ function PrescriptionSection({
 
           {/* Advice */}
           <SectionShell title="Advice / Notes">
-            <Textarea
+            <AutoResizeTextarea
               rows={5}
               value={payload.advice || ""}
-              onChange={(e) => onFieldChange("advice", e.target.value)}
+              onValueChange={(val) => onFieldChange("advice", val)}
+              onTypingStateChange={(t) => setIsTyping(t)}
               disabled={isFinalized || !canManage}
               placeholder="Advice, precautions, and notes for the patient."
-              className="scroll-mt-24 rounded-xl"
-              onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
+              className="rounded-xl"
             />
           </SectionShell>
 
@@ -1654,7 +1762,7 @@ function PrescriptionSection({
 
 /* ─── Medicine card (expandable) ────────────────────────────────── */
 
-function MedicineCard({
+const MedicineCard = React.memo(function MedicineCard({
   item,
   index,
   disabled,
@@ -1665,9 +1773,9 @@ function MedicineCard({
   item: RxItem;
   index: number;
   disabled: boolean;
-  onUpdate: (field: keyof RxItem, value: string) => void;
-  onDuplicate: () => void;
-  onRemove: () => void;
+  onUpdate: (index: number, field: keyof RxItem, value: string) => void;
+  onDuplicate: (index: number) => void;
+  onRemove: (index: number) => void;
 }) {
   const [expanded, setExpanded] = useState(!item.name);
   const hasName = item.name.trim().length > 0;
@@ -1717,7 +1825,7 @@ function MedicineCard({
               onClick={(e) => {
                 e.stopPropagation();
                 hapticPulse();
-                onDuplicate();
+                onDuplicate(index);
               }}
               className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-bg/50 text-brand-subtext/70 transition-colors active:scale-90 hover:bg-brand-bg hover:text-brand-dark sm:h-8 sm:w-8"
               title="Duplicate"
@@ -1729,7 +1837,7 @@ function MedicineCard({
               onClick={(e) => {
                 e.stopPropagation();
                 hapticWarning();
-                onRemove();
+                onRemove(index);
               }}
               className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-50/50 text-red-400 transition-colors active:scale-90 hover:bg-red-50 hover:text-red-600 sm:h-8 sm:w-8"
               title="Remove"
@@ -1764,26 +1872,24 @@ function MedicineCard({
                   <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                     Medicine name
                   </label>
-                  <Input
+                  <IsolatedInput
                     value={item.name}
-                    onChange={(e) => onUpdate("name", e.target.value)}
+                    onValueChange={(val) => onUpdate(index, "name", val)}
                     disabled={disabled}
                     placeholder="e.g. Paracetamol"
                     className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                    onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                   />
                 </div>
                 <div>
                   <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                     Dosage
                   </label>
-                  <Input
+                  <IsolatedInput
                     value={item.dosage || ""}
-                    onChange={(e) => onUpdate("dosage", e.target.value)}
+                    onValueChange={(val) => onUpdate(index, "dosage", val)}
                     disabled={disabled}
                     placeholder="e.g. 500mg"
                     className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                    onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                   />
                 </div>
               </div>
@@ -1793,26 +1899,24 @@ function MedicineCard({
                   <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                     Frequency
                   </label>
-                  <Input
+                  <IsolatedInput
                     value={item.frequency || ""}
-                    onChange={(e) => onUpdate("frequency", e.target.value)}
+                    onValueChange={(val) => onUpdate(index, "frequency", val)}
                     disabled={disabled}
                     placeholder="e.g. 1-0-1"
                     className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                    onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                   />
                 </div>
                 <div>
                   <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                     Duration
                   </label>
-                  <Input
+                  <IsolatedInput
                     value={item.duration || ""}
-                    onChange={(e) => onUpdate("duration", e.target.value)}
+                    onValueChange={(val) => onUpdate(index, "duration", val)}
                     disabled={disabled}
                     placeholder="e.g. 5 days"
                     className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                    onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                   />
                 </div>
               </div>
@@ -1821,13 +1925,12 @@ function MedicineCard({
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
                   Instructions
                 </label>
-                <Input
+                <IsolatedInput
                   value={item.instructions || ""}
-                  onChange={(e) => onUpdate("instructions", e.target.value)}
+                  onValueChange={(val) => onUpdate(index, "instructions", val)}
                   disabled={disabled}
                   placeholder="e.g. After food"
                   className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                  onFocus={(e) => e.target.scrollIntoView({ behavior: "smooth", block: "center" })}
                 />
               </div>
             </div>
@@ -1836,7 +1939,13 @@ function MedicineCard({
       </AnimatePresence>
     </div>
   );
-}
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.item === nextProps.item &&
+    prevProps.index === nextProps.index &&
+    prevProps.disabled === nextProps.disabled
+  );
+});
 
 /* ─── Template dropdown ─────────────────────────────────────────── */
 
