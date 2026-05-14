@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
@@ -30,14 +31,16 @@ type LoginForm = z.infer<typeof loginSchema>;
 type VerifyForm = z.infer<typeof verifySchema>;
 
 export default function DoctorLoginPage() {
+  const router = useRouter();
   const { setAuth, isAuthenticated } = useDoctorAuth();
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
-      window.location.href = "/doctor/dashboard";
+      router.refresh();
+      router.replace("/doctor/dashboard");
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, router]);
 
   const [loginLoading, setLoginLoading] = useState(false);
   const [verifyLoading, setVerifyLoading] = useState(false);
@@ -76,7 +79,8 @@ export default function DoctorLoginPage() {
       const loginData = data as DoctorLoginResponse;
       setAuth(loginData.doctor);
       notifySuccess("Welcome back", "Your dashboard is ready.");
-      window.location.href = !loginData.doctor.profile_complete ? "/doctor/profile" : "/doctor/dashboard";
+      router.refresh();
+      router.push(!loginData.doctor.profile_complete ? "/doctor/profile" : "/doctor/dashboard");
     } catch (error) {
       notifyError("Couldn't sign you in", getApiError(error));
     } finally {
@@ -100,7 +104,8 @@ export default function DoctorLoginPage() {
       resetVerifyForm({ code: "" });
       setAuth(data.doctor);
       notifySuccess("Verification complete", "You're signed in and ready to continue.");
-      window.location.href = !data.doctor.profile_complete ? "/doctor/profile" : "/doctor/dashboard";
+      router.refresh();
+      router.push(!data.doctor.profile_complete ? "/doctor/profile" : "/doctor/dashboard");
     } catch (error) {
       notifyError("Couldn't verify code", getApiError(error));
     } finally {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -23,6 +24,7 @@ function WhatsAppIcon({ className }: { className?: string }) {
 }
 
 export default function PatientLoginPage() {
+  const router = useRouter();
   const { isAuthenticated, setAuth } = usePatientAuth();
   const [sessionChecking, setSessionChecking] = useState(true);
 
@@ -37,9 +39,10 @@ export default function PatientLoginPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      window.location.href = "/patient/dashboard";
+      router.refresh();
+      router.replace("/patient/dashboard");
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, router]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -50,13 +53,14 @@ export default function PatientLoginPage() {
     api.get("/patient/auth/me").then(({ data }) => {
       if (cancelled) return;
       setAuth(data);
-      window.location.href = "/patient/dashboard";
+      router.refresh();
+      router.replace("/patient/dashboard");
     }).catch(() => {
       if (!cancelled) setSessionChecking(false);
     });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setAuth]);
+  }, [router, setAuth]);
 
   useEffect(() => {
     if (resendTimer <= 0) return;
@@ -122,7 +126,8 @@ export default function PatientLoginPage() {
       });
       setAuth(data.patient);
       notifySuccess("Welcome!", "You've been signed in successfully.");
-      window.location.href = "/patient/dashboard";
+      router.refresh();
+      router.replace("/patient/dashboard");
     } catch (error) {
       notifyError("Verification failed", getApiError(error));
       setOtp(["", "", "", "", "", ""]);

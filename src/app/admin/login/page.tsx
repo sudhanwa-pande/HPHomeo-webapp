@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
@@ -29,6 +30,7 @@ interface TotpSetupResponse {
 }
 
 export default function AdminLoginPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<"verify" | "setup">("verify");
   const [loading, setLoading] = useState(false);
   const [setupLoading, setSetupLoading] = useState(false);
@@ -49,7 +51,7 @@ export default function AdminLoginPage() {
         const { data } = await api.get("/auth/me");
         if (!data?.is_admin) {
           notifyError("Admin access required", "Sign in with an admin-enabled account to continue.");
-          window.location.href = "/doctor/login";
+          router.replace("/doctor/login");
           return;
         }
         const enabled = Boolean(data.totp_enabled);
@@ -58,7 +60,7 @@ export default function AdminLoginPage() {
           setMode("setup");
         }
       } catch {
-        window.location.href = "/doctor/login";
+        router.replace("/doctor/login");
         return;
       } finally {
         setChecking(false);
@@ -66,14 +68,15 @@ export default function AdminLoginPage() {
     }
 
     verifyAdminAccess();
-  }, []);
+  }, [router]);
 
   async function onVerify(values: CodeForm) {
     setLoading(true);
     try {
       await api.post("/admin/auth/verify", values);
       notifySuccess("Admin session verified", "You're cleared to access admin controls.");
-      window.location.href = "/admin/dashboard";
+      router.refresh();
+      router.push("/admin/dashboard");
     } catch (error) {
       const message = getApiError(error);
       if (message === "Admin TOTP setup required") {
