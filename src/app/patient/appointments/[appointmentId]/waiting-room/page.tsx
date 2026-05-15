@@ -45,7 +45,6 @@ import { LiveCallRoom } from "@/components/call/live-call-room";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/loading";
 import { DoctorInfoCard } from "@/components/appointment/doctor-info-card";
-import { MediaTestPanel } from "@/components/appointment/media-test-panel";
 import { cn } from "@/lib/utils";
 import type { PatientAppointmentsResponse } from "@/types/patient";
 import type { VideoTokenResponse } from "@/types/doctor";
@@ -66,7 +65,6 @@ function WaitingRoomContent() {
   const queryClient = useQueryClient();
   const appointmentId = params.appointmentId as string;
   const [tipIndex, setTipIndex] = useState(0);
-  const [mediaChecked, setMediaChecked] = useState(false);
 
   // LiveKit state
   const [tokenData, setTokenData] = useState<VideoTokenResponse | null>(null);
@@ -255,13 +253,13 @@ function WaitingRoomContent() {
     }
   }, [appointmentId]);
 
-  // Auto-connect to LiveKit once media check passes
+  // Auto-connect to LiveKit immediately
   const autoConnectRef = useRef(false);
   useEffect(() => {
-    if (!mediaChecked || autoConnectRef.current || tokenData || joining) return;
+    if (autoConnectRef.current || tokenData || joining) return;
     autoConnectRef.current = true;
     void connectToRoom();
-  }, [mediaChecked, connectToRoom, tokenData, joining]);
+  }, [connectToRoom, tokenData, joining]);
 
   const handleMediaDeviceFailure = useCallback(
     (_failure?: unknown, kind?: string) => {
@@ -369,7 +367,7 @@ function WaitingRoomContent() {
   }
 
   // ─── Pre-connect waiting room UI ─────────────────────────────────
-  const currentStep = joining ? 2 : mediaChecked ? 2 : 1;
+  const currentStep = joining ? 2 : 1;
 
   return (
     <PatientShell
@@ -437,9 +435,7 @@ function WaitingRoomContent() {
                   Waiting for Dr. {apt.doctor_name.split(" ").pop()}
                 </h2>
                 <p className="mx-auto mt-1.5 max-w-sm text-sm text-gray-500">
-                  {mediaChecked
-                    ? "You'll be connected automatically when the doctor joins"
-                    : "Complete the media check below to get started"}
+                  You'll be connected automatically when the doctor joins
                 </p>
               </>
             )}
@@ -571,11 +567,6 @@ function WaitingRoomContent() {
             </p>
           </div>
         </div>
-
-        {/* Media test — once passed, auto-connects to LiveKit */}
-        {!mediaChecked && (
-          <MediaTestPanel onMediaReady={() => setMediaChecked(true)} />
-        )}
 
         {/* Tips */}
         <div className="rounded-2xl border border-gray-200/60 bg-white p-5">
