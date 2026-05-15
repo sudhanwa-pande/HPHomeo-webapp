@@ -256,6 +256,7 @@ function DetailContent() {
     }
   }, []);
   const [keyboardSpacerHeight, setKeyboardSpacerHeight] = useState(0);
+  const lastSpacerHeightRef = useRef(0);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
@@ -263,7 +264,6 @@ function DetailContent() {
     
     // Track max height to infer keyboard
     let maxHeight = vv.height;
-    const lastSpacerHeightRef = useRef(0);
     
     const handleResize = () => {
       if (vv.height > maxHeight) maxHeight = vv.height;
@@ -282,6 +282,7 @@ function DetailContent() {
 
   // Auto-save timer ref
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestSaveId = useRef(0);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   /* ── queries ───────────────────────────────────────────────────── */
@@ -377,10 +378,12 @@ function DetailContent() {
   const canManagePrescription = apt
     ? ["confirmed", "completed"].includes(apt.status)
     : false;
+  const comparablePayload = useMemo(() => toComparablePayload(payload), [payload]);
+  const comparableBaseline = useMemo(() => toComparablePayload(baseline), [baseline]);
+
   const hasUnsavedChanges =
     !isFinalized &&
-    JSON.stringify(toComparablePayload(payload)) !==
-      JSON.stringify(toComparablePayload(baseline));
+    JSON.stringify(comparablePayload) !== JSON.stringify(comparableBaseline);
 
   const canStartConsultation =
     apt?.mode === "online" && apt?.video_enabled && apt?.status === "confirmed";
@@ -523,8 +526,10 @@ function DetailContent() {
     },
     onSuccess: (blob) => {
       if (previewAbortRef.current?.signal.aborted) return;
-      if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
-      setPreviewBlobUrl(URL.createObjectURL(blob));
+      setPreviewBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(blob);
+      });
       setPreviewOpen(true);
     },
     onError: (error) =>
@@ -539,8 +544,17 @@ function DetailContent() {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
 
     autoSaveTimerRef.current = setTimeout(() => {
+      const saveId = ++latestSaveId.current;
+
       setAutoSaveStatus("saving");
-      saveDraftMutation.mutate(payload);
+
+      saveDraftMutation.mutate(payload, {
+        onSuccess: () => {
+          if (saveId !== latestSaveId.current) return; // ignore stale response
+          setAutoSaveStatus("saved");
+          setTimeout(() => setAutoSaveStatus("idle"), 2000);
+        },
+      });
     }, 3000);
 
     return () => {
@@ -616,10 +630,14 @@ function DetailContent() {
       notifyError("Add details first", "Include at least one clinical or medication detail.");
       return;
     }
-    if (!prescriptionExists || hasUnsavedChanges) {
-      await saveDraftMutation.mutateAsync(latestPayload);
+    try {
+      if (!prescriptionExists || hasUnsavedChanges) {
+        await saveDraftMutation.mutateAsync(latestPayload);
+      }
+      await finalizeMutation.mutateAsync();
+    } catch {
+      return; // stop finalize if save fails
     }
-    await finalizeMutation.mutateAsync();
     hapticSuccess();
   };
 
@@ -638,6 +656,9 @@ function DetailContent() {
   };
 
   const applyTemplate = (template: PrescriptionTemplate) => {
+    if (hasUnsavedChanges) {
+      notifyInfo("Unsaved changes will be replaced", "Applying template over unsaved work.");
+    }
     setDraftPayload(normalizePayload(template.payload));
     setTemplateDialogOpen(false);
     notifyInfo("Template applied", `${template.name} loaded.`);
