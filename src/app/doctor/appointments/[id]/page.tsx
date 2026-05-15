@@ -435,9 +435,13 @@ function DetailContent() {
     mutationFn: async (nextPayload: PrescriptionPayload) => {
       const prepared = preparePayloadForApi(nextPayload);
       const endpoint = `/doctor/appointments/${appointmentId}/prescription`;
+      const payloadWithVersion = {
+        ...prepared,
+        version: prescription?.updated_at,
+      };
       const { data } = prescriptionExists
-        ? await api.put<Prescription>(endpoint, prepared)
-        : await api.post<Prescription>(endpoint, prepared);
+        ? await api.put<Prescription>(endpoint, payloadWithVersion)
+        : await api.post<Prescription>(endpoint, payloadWithVersion);
       return data;
     },
     onSuccess: (data) => {
@@ -449,7 +453,13 @@ function DetailContent() {
       setAutoSaveStatus("saved");
       setTimeout(() => setAutoSaveStatus("idle"), 2000);
     },
-    onError: (error) => notifyApiError(error, "Couldn't save draft"),
+    onError: (error) => {
+      setAutoSaveStatus("idle");
+      notifyError(
+        "Auto-save failed",
+        "Your changes are not saved. Please check connection."
+      );
+    },
   });
 
   const finalizeMutation = useMutation({
@@ -460,12 +470,14 @@ function DetailContent() {
       }>(`/doctor/appointments/${appointmentId}/prescription/generate`);
       return data;
     },
+    onMutate: () => {
+      setDraftPayload(null);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData<PrescriptionResponse>(
         ["doctor-appointment-prescription", appointmentId],
         { exists: true, prescription: data.prescription },
       );
-      setDraftPayload(null);
       notifySuccess(
         "Prescription finalized",
         "The prescription is now locked and ready to view.",
@@ -563,6 +575,20 @@ function DetailContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload, hasUnsavedChanges, isFinalized, canManagePrescription]);
 
+  /* ── dirty exit protection ─────────────────────────────────────── */
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnsavedChanges]);
+
 
   /* ── prescription field handlers ───────────────────────────────── */
 
@@ -630,6 +656,12 @@ function DetailContent() {
       notifyError("Add details first", "Include at least one clinical or medication detail.");
       return;
     }
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    latestSaveId.current++; // invalidate pending saves
+
     try {
       if (!prescriptionExists || hasUnsavedChanges) {
         await saveDraftMutation.mutateAsync(latestPayload);
