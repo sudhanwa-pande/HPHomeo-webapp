@@ -256,6 +256,7 @@ function DetailContent() {
     }
   }, []);
   const [keyboardSpacerHeight, setKeyboardSpacerHeight] = useState(0);
+  const lastSpacerHeightRef = useRef(0);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
@@ -263,7 +264,6 @@ function DetailContent() {
     
     // Track max height to infer keyboard
     let maxHeight = vv.height;
-    const lastSpacerHeightRef = useRef(0);
     
     const handleResize = () => {
       if (vv.height > maxHeight) maxHeight = vv.height;
@@ -282,6 +282,7 @@ function DetailContent() {
 
   // Auto-save timer ref
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestSaveId = useRef(0);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   /* ── queries ───────────────────────────────────────────────────── */
@@ -377,10 +378,12 @@ function DetailContent() {
   const canManagePrescription = apt
     ? ["confirmed", "completed"].includes(apt.status)
     : false;
+  const comparablePayload = useMemo(() => toComparablePayload(payload), [payload]);
+  const comparableBaseline = useMemo(() => toComparablePayload(baseline), [baseline]);
+
   const hasUnsavedChanges =
     !isFinalized &&
-    JSON.stringify(toComparablePayload(payload)) !==
-      JSON.stringify(toComparablePayload(baseline));
+    JSON.stringify(comparablePayload) !== JSON.stringify(comparableBaseline);
 
   const canStartConsultation =
     apt?.mode === "online" && apt?.video_enabled && apt?.status === "confirmed";
@@ -432,9 +435,13 @@ function DetailContent() {
     mutationFn: async (nextPayload: PrescriptionPayload) => {
       const prepared = preparePayloadForApi(nextPayload);
       const endpoint = `/doctor/appointments/${appointmentId}/prescription`;
+      const payloadWithVersion = {
+        ...prepared,
+        version: prescription?.updated_at,
+      };
       const { data } = prescriptionExists
-        ? await api.put<Prescription>(endpoint, prepared)
-        : await api.post<Prescription>(endpoint, prepared);
+        ? await api.put<Prescription>(endpoint, payloadWithVersion)
+        : await api.post<Prescription>(endpoint, payloadWithVersion);
       return data;
     },
     onSuccess: (data) => {
@@ -446,7 +453,13 @@ function DetailContent() {
       setAutoSaveStatus("saved");
       setTimeout(() => setAutoSaveStatus("idle"), 2000);
     },
-    onError: (error) => notifyApiError(error, "Couldn't save draft"),
+    onError: (error) => {
+      setAutoSaveStatus("idle");
+      notifyError(
+        "Auto-save failed",
+        "Your changes are not saved. Please check connection."
+      );
+    },
   });
 
   const finalizeMutation = useMutation({
@@ -457,12 +470,14 @@ function DetailContent() {
       }>(`/doctor/appointments/${appointmentId}/prescription/generate`);
       return data;
     },
+    onMutate: () => {
+      setDraftPayload(null);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData<PrescriptionResponse>(
         ["doctor-appointment-prescription", appointmentId],
         { exists: true, prescription: data.prescription },
       );
-      setDraftPayload(null);
       notifySuccess(
         "Prescription finalized",
         "The prescription is now locked and ready to view.",
@@ -523,8 +538,10 @@ function DetailContent() {
     },
     onSuccess: (blob) => {
       if (previewAbortRef.current?.signal.aborted) return;
-      if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
-      setPreviewBlobUrl(URL.createObjectURL(blob));
+      setPreviewBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(blob);
+      });
       setPreviewOpen(true);
     },
     onError: (error) =>
@@ -539,8 +556,17 @@ function DetailContent() {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
 
     autoSaveTimerRef.current = setTimeout(() => {
+      const saveId = ++latestSaveId.current;
+
       setAutoSaveStatus("saving");
-      saveDraftMutation.mutate(payload);
+
+      saveDraftMutation.mutate(payload, {
+        onSuccess: () => {
+          if (saveId !== latestSaveId.current) return; // ignore stale response
+          setAutoSaveStatus("saved");
+          setTimeout(() => setAutoSaveStatus("idle"), 2000);
+        },
+      });
     }, 3000);
 
     return () => {
@@ -548,6 +574,20 @@ function DetailContent() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload, hasUnsavedChanges, isFinalized, canManagePrescription]);
+
+  /* ── dirty exit protection ─────────────────────────────────────── */
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnsavedChanges]);
 
 
   /* ── prescription field handlers ───────────────────────────────── */
@@ -616,10 +656,20 @@ function DetailContent() {
       notifyError("Add details first", "Include at least one clinical or medication detail.");
       return;
     }
-    if (!prescriptionExists || hasUnsavedChanges) {
-      await saveDraftMutation.mutateAsync(latestPayload);
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
     }
-    await finalizeMutation.mutateAsync();
+    latestSaveId.current++; // invalidate pending saves
+
+    try {
+      if (!prescriptionExists || hasUnsavedChanges) {
+        await saveDraftMutation.mutateAsync(latestPayload);
+      }
+      await finalizeMutation.mutateAsync();
+    } catch {
+      return; // stop finalize if save fails
+    }
     hapticSuccess();
   };
 
@@ -638,6 +688,9 @@ function DetailContent() {
   };
 
   const applyTemplate = (template: PrescriptionTemplate) => {
+    if (hasUnsavedChanges) {
+      notifyInfo("Unsaved changes will be replaced", "Applying template over unsaved work.");
+    }
     setDraftPayload(normalizePayload(template.payload));
     setTemplateDialogOpen(false);
     notifyInfo("Template applied", `${template.name} loaded.`);
