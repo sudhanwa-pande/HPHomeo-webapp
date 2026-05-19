@@ -61,17 +61,20 @@ export function HealSection() {
         };
 
   return (
-    <section className="py-12 sm:py-16 md:py-20">
-      <div className="container-main">
+    <section className="relative py-12 sm:py-16 md:py-20 bg-brand-dark text-white overflow-hidden bg-noise">
+      {/* Background glow */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(88,155,255,0.08),transparent_60%)] pointer-events-none" />
+      
+      <div className="container-main relative z-10">
         {/* Header */}
         <motion.div className="max-w-xl mb-10 sm:mb-14" {...fade(0)}>
-          <span className="inline-flex items-center rounded-full border border-brand/15 bg-brand/[0.06] px-3.5 py-1 text-[11px] sm:text-[12px] font-semibold text-brand tracking-wide">
+          <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3.5 py-1 text-[11px] sm:text-[12px] font-semibold text-brand-accent tracking-wide">
             Why Choose Us
           </span>
-          <h2 className="mt-4 text-[clamp(1.4rem,3vw,2.25rem)] font-bold leading-[1.1] tracking-[-0.03em] text-brand-dark">
+          <h2 className="mt-4 text-[clamp(1.4rem,3vw,2.25rem)] font-bold leading-[1.1] text-white">
             Built for Modern Healthcare
           </h2>
-          <p className="mt-3 text-[13.5px] sm:text-[14.5px] leading-relaxed text-brand-subtext max-w-md">
+          <p className="mt-3 text-[13.5px] sm:text-[14.5px] leading-relaxed text-white/70 max-w-md">
             Access expert homeopathic care digitally — from home, while travelling, or anywhere else.
           </p>
         </motion.div>
@@ -91,16 +94,16 @@ export function HealSection() {
               variants={prefersReducedMotion ? undefined : itemVariants}
             >
               <motion.div
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-brand-bg"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/10"
                 whileHover={prefersReducedMotion ? {} : { scale: 1.2, rotate: -8 }}
                 transition={{ type: "spring", stiffness: 300, damping: 15 }}
               >
-                <f.icon className="h-[18px] w-[18px] text-brand" strokeWidth={1.8} />
+                <f.icon className="h-[18px] w-[18px] text-brand-accent" strokeWidth={1.8} />
               </motion.div>
-              <h3 className="mt-3 text-[13.5px] sm:text-[14.5px] font-semibold tracking-[-0.01em] text-brand-dark">
+              <h3 className="mt-3 text-[13.5px] sm:text-[14.5px] font-semibold tracking-[-0.01em] text-white">
                 {f.title}
               </h3>
-              <p className="mt-1 text-[12px] sm:text-[13px] leading-[1.55] text-brand-subtext">
+              <p className="mt-1 text-[12px] sm:text-[13px] leading-[1.55] text-white/70">
                 {f.desc}
               </p>
             </motion.div>

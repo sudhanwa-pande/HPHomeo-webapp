@@ -22,7 +22,7 @@ export function Hero() {
         };
 
   return (
-    <section className="relative overflow-hidden pt-12 pb-10 sm:pt-16 sm:pb-14 md:pt-20 md:pb-16">
+    <section className="relative overflow-hidden pt-12 pb-10 sm:pt-16 sm:pb-14 md:pt-20 md:pb-16 bg-noise section-glow">
       {/* Background — subtle radial glow, not blobs */}
       <div className="absolute inset-0 -z-10">
         <div className="absolute left-1/2 top-0 -translate-x-1/2 w-[900px] h-[500px] rounded-full bg-brand/[0.04] blur-[120px]" />
@@ -52,15 +52,15 @@ export function Hero() {
             <span className="bg-gradient-to-r from-brand-accent to-brand bg-clip-text text-transparent">
               with
             </span>
-            {/* Reduced gap from gap-2 sm:gap-4 to gap-1 sm:gap-2 to pull the icon closer */}
-            <span className="inline-flex items-center gap-1 sm:gap-2 whitespace-nowrap">
+            {/* Icon is absolutely positioned so it doesn't shift the text off-center on mobile */}
+            <span className="relative inline-flex items-center whitespace-nowrap">
               <span className="text-brand">Homeopathy</span>
               <Image
                 src="/images/icons8-homeopathy-100.png"
                 alt=""
                 width={80} 
                 height={80}
-                className="h-[36px] w-[36px] sm:h-[48px] sm:w-[48px] md:h-[64px] md:w-[64px] lg:h-[72px] lg:w-[72px] object-contain"
+                className="absolute left-full ml-1 sm:ml-2 h-[36px] w-[36px] sm:h-[48px] sm:w-[48px] md:h-[64px] md:w-[64px] lg:h-[72px] lg:w-[72px] object-contain"
                 unoptimized
               />
             </span>
@@ -102,7 +102,7 @@ export function Hero() {
           >
             <Link
               href="/doctors"
-              className="group inline-flex items-center justify-center gap-2.5 rounded-2xl bg-brand-accent px-9 sm:px-10 py-4 sm:py-[18px] text-[15px] sm:text-[16px] font-semibold text-brand-dark shadow-[0_8px_30px_rgba(216,238,83,0.25)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#d0e64b] hover:shadow-[0_16px_40px_rgba(216,238,83,0.3)]"
+              className="group premium-button inline-flex items-center justify-center gap-2.5 rounded-2xl px-9 sm:px-10 py-4 sm:py-[18px] text-[15px] sm:text-[16px] font-semibold text-brand-dark"
             >
               Book an Appointment
               <ArrowRight className="h-[18px] w-[18px] transition-transform duration-300 group-hover:translate-x-1" />
@@ -117,7 +117,7 @@ export function Hero() {
 
           {/* ── Trust strip — compact, horizontal ── */}
           <motion.div
-            className="mt-14 sm:mt-18 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12.5px] sm:text-[13px] text-brand-subtext"
+            className="mt-14 sm:mt-16 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12.5px] sm:text-[13px] text-brand-subtext"
             {...fade(0.25)}
           >
             {[
@@ -167,8 +167,8 @@ export function Hero() {
           {...(prefersReducedMotion
             ? {}
             : {
-                initial: { opacity: 0, y: 24, scale: 0.97 },
-                animate: { opacity: 1, y: 0, scale: 1 },
+                initial: { opacity: 0, y: 24, scale: 0.97, rotate: -1.5 },
+                animate: { opacity: 1, y: 0, scale: 1, rotate: 0 },
                 transition: {
                   duration: 0.6,
                   delay: 0.3,

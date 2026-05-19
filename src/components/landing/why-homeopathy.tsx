@@ -69,7 +69,7 @@ export function WhyHomeopathy() {
           <span className="inline-flex items-center rounded-full border border-brand/15 bg-white px-4 py-1.5 text-[11px] sm:text-[12px] font-semibold text-brand tracking-wide uppercase">
             Why Homeopathy
           </span>
-          <h2 className="mt-5 text-[clamp(1.5rem,3.5vw,2.5rem)] font-bold leading-[1.1] tracking-[-0.03em] text-brand-dark">
+          <h2 className="mt-5 text-[clamp(1.5rem,3.5vw,2.5rem)] font-bold leading-[1.1] text-brand-dark">
             Natural Healing That{" "}
             <span className="bg-gradient-to-r from-brand to-blue-500 bg-clip-text text-transparent">
               Actually Works
@@ -91,7 +91,7 @@ export function WhyHomeopathy() {
           {cards.map((card) => (
             <motion.div
               key={card.title}
-              className="group relative rounded-2xl border border-border/40 bg-white px-6 sm:px-7 py-10 sm:py-12 transition-all duration-300 hover:border-brand/20 hover:shadow-[0_8px_30px_rgba(88,155,255,0.08)] hover:-translate-y-1 text-center flex flex-col items-center"
+              className="group glass-card px-6 sm:px-7 py-8 sm:py-9 text-center flex flex-col items-center hover:-translate-y-1"
               variants={prefersReducedMotion ? undefined : cardVariants}
             >
               {/* Icon */}
@@ -102,9 +102,9 @@ export function WhyHomeopathy() {
                 <Image
                   src={card.icon}
                   alt={card.title}
-                  width={36}
-                  height={36}
-                  className="sm:w-11 sm:h-11"
+                  width={48}
+                  height={48}
+                  className="w-10 h-10 sm:w-12 sm:h-12"
                   unoptimized
                 />
               </motion.div>

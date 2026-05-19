@@ -11,10 +11,10 @@
   --color-brand-dark: #131313;
   --color-brand-white: #FFFFFF;
   --color-brand-bg: #F4F6FB;
-  --color-brand-subtext: #6B7280;
+  --color-brand-subtext: #4B5563;
   --color-brand-surface: #FBFCFF;
   --color-brand-surface-strong: #F0F4FA;
-  --color-brand-ink-soft: #364152;
+  --color-brand-ink-soft: #1F2937;
 
   /* Status */
   --color-success: #22C55E;
@@ -186,6 +186,67 @@
     display: flex;
     flex-direction: column;
     gap: 2rem;
+  }
+
+  .premium-button {
+    background: linear-gradient(to right, var(--color-brand-accent), #d8ff63);
+    box-shadow: 0 8px 24px rgba(216, 238, 83, 0.28);
+    transition: all 300ms ease;
+  }
+  .premium-button:hover {
+    box-shadow: 0 12px 32px rgba(216, 238, 83, 0.35);
+    transform: translateY(-0.125rem);
+  }
+
+  .section-glow {
+    position: relative;
+  }
+  .section-glow::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at top, rgba(88,155,255,0.06), transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .glass-card {
+    border-radius: 1rem;
+    background-color: #ffffff;
+    border: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
+    transition: all 300ms ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(to right, rgba(88,155,255,0), rgba(88,155,255,0.04), rgba(88,155,255,0));
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .glass-card:hover {
+    border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
+  }
+  .glass-card:hover::before {
+    opacity: 1;
+  }
+
+  .bg-noise {
+    position: relative;
+  }
+  .bg-noise::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PScwIDAgMjAwIDIwMCcgeG1sbnM9J2h0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnJz48ZmlsdGVyIGlkPSdub2lzZUZpbHRlcic+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuODUnIG51bU9jdGF2ZXM9JzMnIHN0aXRjaFRpbGVzPSdzdGl0Y2gnLz48L2ZpbHRlcj48cmVjdCB3aWR0aD0nMTAwJScgaGVpZ2h0PScxMDAlJyBmaWx0ZXI9J3VybCgjbm9pc2VGaWx0ZXIpJy8+PC9zdmc+");
+    opacity: 0.02;
+    pointer-events: none;
+    z-index: 0;
   }
 
   .surface-panel {

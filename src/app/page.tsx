@@ -6,6 +6,7 @@ import { WhyHomeopathy } from "@/components/landing/why-homeopathy";
 import { Journey } from "@/components/landing/journey";
 import { DoctorsPreview } from "@/components/landing/doctors-preview";
 import { HealSection } from "@/components/landing/heal-section";
+import { StickyMobileCTA } from "@/components/landing/sticky-mobile-cta";
 
 export default function Home() {
   return (
@@ -20,6 +21,7 @@ export default function Home() {
           <HealSection />
         </ClientOnly>
       </main>
+      <StickyMobileCTA />
       <Footer />
     </>
   );

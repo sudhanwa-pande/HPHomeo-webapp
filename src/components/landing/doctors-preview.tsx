@@ -37,10 +37,10 @@ function DoctorCard({ doc, index }: { doc: PublicDoctor; index: number }) {
     >
       <Link
         href="/doctors"
-        className="group flex items-start gap-3.5 shrink-0 w-[280px] sm:w-[300px] rounded-xl sm:rounded-2xl border border-border/40 bg-white p-4 sm:p-5 transition-all duration-300 hover:border-border/70 hover:-translate-y-0.5 hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)]"
+        className="group flex items-start gap-4 shrink-0 w-[320px] sm:w-[340px] glass-card p-5 sm:p-6 hover:-translate-y-0.5"
       >
         {/* Avatar */}
-        <div className="shrink-0 h-12 w-12 sm:h-14 sm:w-14 rounded-xl bg-brand-bg overflow-hidden flex items-center justify-center">
+        <div className="shrink-0 h-16 w-16 sm:h-20 sm:w-20 rounded-xl bg-brand-bg overflow-hidden flex items-center justify-center">
           {doc.profile_photo ? (
             <Image
               src={doc.profile_photo}
@@ -79,6 +79,12 @@ function DoctorCard({ doc, index }: { doc: PublicDoctor; index: number }) {
               <span className="whitespace-nowrap">{doc.experience_years} yr{doc.experience_years !== 1 ? "s" : ""}</span>
             )}
           </div>
+
+          {/* Availability */}
+          <div className="mt-3.5 inline-flex items-center gap-1.5 rounded-full bg-green-50/80 px-2.5 py-1 text-[11px] font-medium text-green-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+            Available today
+          </div>
         </div>
       </Link>
     </motion.div>
@@ -87,8 +93,8 @@ function DoctorCard({ doc, index }: { doc: PublicDoctor; index: number }) {
 
 function SkeletonCard() {
   return (
-    <div className="flex items-start gap-3.5 shrink-0 w-[280px] sm:w-[300px] rounded-xl sm:rounded-2xl border border-border/30 bg-white p-4 sm:p-5">
-      <div className="shrink-0 h-12 w-12 sm:h-14 sm:w-14 rounded-xl animate-pulse bg-brand-bg" />
+    <div className="flex items-start gap-4 shrink-0 w-[320px] sm:w-[340px] rounded-2xl border border-border/30 bg-white p-5 sm:p-6">
+      <div className="shrink-0 h-16 w-16 sm:h-20 sm:w-20 rounded-xl animate-pulse bg-brand-bg" />
       <div className="flex-1 space-y-2.5 pt-0.5">
         <div className="h-4 w-28 animate-pulse rounded bg-brand-bg" />
         <div className="h-3 w-16 animate-pulse rounded bg-brand-bg" />
@@ -147,7 +153,7 @@ export function DoctorsPreview() {
           <span className="inline-flex items-center rounded-full border border-brand/15 bg-white px-3.5 py-1 text-[11px] sm:text-[12px] font-semibold text-brand tracking-wide">
             Our Doctors
           </span>
-          <h2 className="mt-4 text-[clamp(1.4rem,3vw,2.25rem)] font-bold leading-[1.1] tracking-[-0.03em] text-brand-dark">
+          <h2 className="mt-4 text-[clamp(1.4rem,3vw,2.25rem)] font-bold leading-[1.1] text-brand-dark">
             Meet the Experts
           </h2>
         </motion.div>
