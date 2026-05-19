@@ -76,7 +76,7 @@ export function PatientShell({ children, title, headerRight }: PatientShellProps
         <header className="sticky top-0 z-30 flex min-h-[52px] items-center justify-between border-b border-border/20 bg-white/90 px-4 backdrop-blur-md sm:px-5 lg:px-6">
           <div className="flex min-w-0 items-center gap-2.5">
             <SidebarTrigger className="-ml-1 text-brand-subtext hover:text-brand-dark" />
-            <h1 className="truncate text-[14px] font-semibold text-brand-dark">{title}</h1>
+            <h1 className="font-display truncate text-[15px] font-bold tracking-tight text-brand-dark">{title}</h1>
           </div>
           {headerRight ? (
             <div className="flex items-center gap-2">{headerRight}</div>

@@ -144,14 +144,13 @@ function DoctorCard({
   return (
     <div
       onClick={onClick}
-      className="group flex cursor-pointer items-start gap-4 rounded-xl border border-gray-200/60 bg-white p-4 transition-all hover:border-gray-300/80 hover:shadow-sm"
-    >
+      className="group flex cursor-pointer items-start gap-4 rounded-xl border border-border/40 bg-white p-4 transition-all duration-300 hover:border-brand/35 hover:-translate-y-0.5 hover:shadow-[0_12px_30px_-15px_rgba(22,101,52,0.08)]">
       {/* Avatar */}
       {doctor.profile_photo ? (
         <img
           src={doctor.profile_photo}
           alt={doctor.full_name}
-          className="h-14 w-14 shrink-0 rounded-full object-cover ring-2 ring-gray-100"
+          className="h-14 w-14 shrink-0 rounded-full object-cover ring-2 ring-brand/10 group-hover:scale-[1.04] transition-transform duration-300"
         />
       ) : (
         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-indigo-600 text-sm font-bold text-white ring-2 ring-gray-100">
@@ -163,7 +162,7 @@ function DoctorCard({
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-gray-900">{doctor.full_name}</p>
+            <p className="truncate font-display text-[14px] font-bold text-brand-dark tracking-tight">{doctor.full_name}</p>
             <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-500">
               <Stethoscope className="h-3 w-3 shrink-0 text-brand/60" />
               {specialization}
@@ -210,9 +209,9 @@ function DoctorCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              // triggers the parent onClick for detail view
+              onClick();
             }}
-            className="text-[11px] font-medium text-gray-400 transition-colors group-hover:text-brand"
+            className="text-[11.5px] font-semibold text-brand/80 hover:text-brand hover:underline transition-colors cursor-pointer"
           >
             View profile
           </button>
@@ -293,7 +292,7 @@ function DoctorDetailSheet({
                     </div>
                   )}
                   <div className="min-w-0">
-                    <h2 className="text-lg font-bold text-gray-900">{doctor.full_name}</h2>
+                    <h2 className="font-display text-lg font-extrabold tracking-tight text-brand-dark">{doctor.full_name}</h2>
                     <p className="flex items-center gap-1.5 text-sm text-gray-500">
                       <Stethoscope className="h-3.5 w-3.5 text-brand/60" />
                       {specialization}
@@ -325,7 +324,7 @@ function DoctorDetailSheet({
               {/* Bio */}
               {doctor.about && (
                 <div className="border-b border-gray-100 px-6 py-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">About</p>
+                  <p className="font-display text-[10px] font-extrabold uppercase tracking-widest text-[#9CA3AF]">About</p>
                   <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{doctor.about}</p>
                 </div>
               )}
@@ -357,7 +356,7 @@ function DoctorDetailSheet({
               {/* Fees */}
               {(doctor.online_fee != null || doctor.walkin_fee != null) && (
                 <div className="border-b border-gray-100 px-6 py-4">
-                  <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Consultation Fees</p>
+                  <p className="font-display mb-2.5 text-[10px] font-extrabold uppercase tracking-widest text-[#9CA3AF]">Consultation Fees</p>
                   <div className="flex gap-3">
                     {doctor.available_modes?.includes("online") && doctor.online_fee != null && (
                       <div className="flex-1 rounded-xl border border-blue-100 bg-blue-50/50 p-3.5 text-center">

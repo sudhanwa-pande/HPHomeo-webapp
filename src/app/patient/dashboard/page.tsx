@@ -129,11 +129,11 @@ function getFollowUpCountdown(until: string) {
   return { days, hours, label, urgent };
 }
 
-function computeGreeting(): string {
+function computeGreeting(): { text: string; emoji: string } {
   const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
+  if (h < 12) return { text: "Good morning", emoji: "☀️" };
+  if (h < 17) return { text: "Good afternoon", emoji: "🌤️" };
+  return { text: "Good evening", emoji: "🌙" };
 }
 
 const STATUS_MAP: Record<string, { label: string; dot: string; text: string }> = {
@@ -142,6 +142,14 @@ const STATUS_MAP: Record<string, { label: string; dot: string; text: string }> =
   completed: { label: "Completed", dot: "bg-blue-500", text: "text-blue-700" },
   cancelled: { label: "Cancelled", dot: "bg-red-500", text: "text-red-500" },
   no_show: { label: "No Show", dot: "bg-slate-400", text: "text-slate-500" },
+};
+
+const STATUS_PILL_MAP: Record<string, string> = {
+  confirmed: "bg-emerald-50 text-emerald-700 border-emerald-100/60",
+  pending_payment: "bg-amber-50 text-amber-700 border-amber-100/60",
+  completed: "bg-blue-50 text-blue-700 border-blue-100/60",
+  cancelled: "bg-red-50 text-red-600 border-red-100/60",
+  no_show: "bg-slate-50 text-slate-600 border-slate-200/60",
 };
 
 /* ── main dashboard ── */
@@ -232,7 +240,7 @@ function DashboardContent() {
   );
 
   // Computed client-side only to avoid SSR/hydration mismatch
-  const [greeting, setGreeting] = useState("Good morning");
+  const [greeting, setGreeting] = useState({ text: "Good morning", emoji: "☀️" });
   useEffect(() => { setGreeting(computeGreeting()); }, []);
   const firstName = patient?.full_name?.split(" ")[0];
 
@@ -241,8 +249,9 @@ function DashboardContent() {
       <div className="space-y-5">
         {/* Greeting */}
         <div>
-          <h2 className="text-xl font-bold tracking-[-0.02em] text-brand-dark">
-            {firstName ? `${greeting}, ${firstName}` : greeting}
+          <h2 className="font-display text-xl font-bold tracking-tight text-brand-dark flex items-center gap-1.5">
+            {firstName ? `${greeting.text}, ${firstName}` : greeting.text}
+            <span className="animate-pulse">{greeting.emoji}</span>
           </h2>
         </div>
 
@@ -291,20 +300,23 @@ function DashboardContent() {
           {/* LEFT COLUMN */}
           <div className="space-y-4 lg:col-span-2">
             {/* Stat Cards */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
               <StatCard
                 label="Upcoming"
                 value={upcomingLoading ? null : upcoming.length}
+                accentClass="border-l-4 border-l-brand"
                 onClick={() => router.push("/patient/appointments")}
               />
               <StatCard
                 label="Completed"
                 value={allLoading ? null : completedCount}
+                accentClass="border-l-4 border-l-blue-500"
                 onClick={() => router.push("/patient/appointments")}
               />
               <StatCard
                 label="Prescriptions"
                 value={totalPrescriptions}
+                accentClass="border-l-4 border-l-indigo-500"
                 onClick={() => router.push("/patient/prescriptions")}
               />
             </div>
@@ -314,7 +326,7 @@ function DashboardContent() {
               <div className="rounded-xl border border-border/40 bg-white p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-brand" />
-                  <h3 className="text-[13px] font-semibold text-brand-dark">Free Follow-ups</h3>
+                  <h3 className="font-display text-[14px] font-bold tracking-tight text-brand-dark">Free Follow-ups</h3>
                   <span className="rounded-full bg-brand-bg px-1.5 py-0.5 text-[10px] font-bold text-brand">{followUpsAvailable.length}</span>
                 </div>
                 <div className="space-y-2">
@@ -330,7 +342,7 @@ function DashboardContent() {
               <div className="rounded-xl border border-border/40 bg-white p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4 text-brand" />
-                  <h3 className="text-[13px] font-semibold text-brand-dark">Refunds in Progress</h3>
+                  <h3 className="font-display text-[14px] font-bold tracking-tight text-brand-dark">Refunds in Progress</h3>
                 </div>
                 <div className="space-y-2">
                   {pendingRefunds.map((apt) => (
@@ -358,7 +370,7 @@ function DashboardContent() {
             {!allLoading && recentActivity.length > 0 && (
               <div className="rounded-xl border border-border/40 bg-white p-4">
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-[13px] font-semibold text-brand-dark">Recent Activity</h3>
+                  <h3 className="font-display text-[14px] font-bold tracking-tight text-brand-dark">Recent Activity</h3>
                   <button
                     onClick={() => router.push("/patient/appointments")}
                     className="text-[12px] font-medium text-brand-subtext transition-colors hover:text-brand-dark"
@@ -378,9 +390,8 @@ function DashboardContent() {
                           <p className="truncate text-[12px] font-medium text-brand-dark">{apt.doctor_name}</p>
                         </div>
                         <span className="shrink-0 text-[11px] text-brand-subtext">{formatDate(apt.scheduled_at)}</span>
-                        <span className="flex shrink-0 items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
-                          <span className={`text-[11px] font-medium ${s.text}`}>{s.label}</span>
+                        <span className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[9.5px] font-bold tracking-wide uppercase ${STATUS_PILL_MAP[apt.status] || "bg-slate-50 text-slate-600 border-slate-200/60"}`}>
+                          {s.label}
                         </span>
                       </div>
                     );
@@ -394,7 +405,7 @@ function DashboardContent() {
           <div className="lg:col-span-1">
             <div className="rounded-xl border border-border/40 bg-white">
               <div className="flex items-center justify-between border-b border-border/20 px-4 py-3">
-                <h3 className="text-[13px] font-semibold text-brand-dark">Upcoming</h3>
+                <h3 className="font-display text-[14px] font-bold tracking-tight text-brand-dark">Upcoming</h3>
                 {upcoming.length > 0 && (
                   <button
                     onClick={() => router.push("/patient/appointments")}
@@ -517,28 +528,30 @@ function NextCallCard({ apt }: { apt: PatientAppointment }) {
 function StatCard({
   label,
   value,
+  accentClass,
   onClick,
 }: {
   label: string;
   value: number | string | null;
+  accentClass: string;
   onClick?: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="rounded-xl border border-border/40 bg-white px-4 py-4 text-left transition-colors hover:border-border/70"
+      className={`relative overflow-hidden rounded-xl border border-border/40 bg-white pl-5 pr-4 py-4.5 text-left transition-all duration-300 hover:border-border/60 hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-8px_rgba(0,0,0,0.06)] group ${accentClass}`}
     >
+      <div className="absolute inset-0 bg-gradient-to-r from-transparent to-brand-bg/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
       {value === null ? (
         <Skeleton className="mb-1.5 h-7 w-10" />
       ) : (
-        <p className="text-2xl font-bold tracking-[-0.02em] text-brand-dark">{value}</p>
+        <p className="font-display text-2xl font-extrabold tracking-tight text-brand-dark">{value}</p>
       )}
-      <p className="mt-0.5 text-[12px] font-medium text-brand-subtext">{label}</p>
+      <p className="mt-0.5 text-[11.5px] font-bold tracking-wide uppercase text-brand-subtext">{label}</p>
     </button>
   );
 }
-
-/* ── Follow-up card ── */
+      /* ── Follow-up card ── */
 
 function FollowUpCard({ apt }: { apt: PatientAppointment }) {
   const router = useRouter();
@@ -600,9 +613,8 @@ function AppointmentCard({ apt }: { apt: PatientAppointment }) {
             <span>{formatTime(apt.scheduled_at)}</span>
           </div>
           <div className="mt-1.5 flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-              <span className={`text-[11px] font-medium ${status.text}`}>{status.label}</span>
+            <span className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[9.5px] font-bold tracking-wide uppercase ${STATUS_PILL_MAP[apt.status] || "bg-slate-50 text-slate-600 border-slate-200/60"}`}>
+              {status.label}
             </span>
             <span className="text-[11px] text-brand-subtext">{getTimeUntil(apt.scheduled_at)}</span>
           </div>
