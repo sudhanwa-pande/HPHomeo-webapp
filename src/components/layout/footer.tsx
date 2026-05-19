@@ -35,7 +35,7 @@ export function Footer({ hideCta = false }: { hideCta?: boolean }) {
         {/* Logo + tagline */}
         <div className="mb-8 sm:mb-10">
           <Image
-            src="/images/logo.png"
+            src="/images/logo.svg"
             alt="hpHomeo"
             width={120}
             height={40}

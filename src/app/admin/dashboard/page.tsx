@@ -304,7 +304,7 @@ function AdminDoctorPanel() {
         }`}
       >
         <div className="flex h-16 items-center justify-between border-b border-border/50 px-5">
-          <Image src="/images/logo.png" alt="hpHomeo" width={120} height={40} className="h-8 w-auto" />
+          <Image src="/images/logo.svg" alt="hpHomeo" width={120} height={40} className="h-8 w-auto" />
           <button className="p-1 text-brand-subtext hover:text-brand-dark lg:hidden" onClick={() => setSidebarOpen(false)}>
             <X className="h-5 w-5" />
           </button>

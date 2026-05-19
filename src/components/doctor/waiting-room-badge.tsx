@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -39,7 +39,7 @@ export function WaitingRoomBadge() {
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
         new Notification("Patient Waiting", {
           body: `${waiting?.[0]?.patient_name ?? "A patient"} is waiting for your call.`,
-          icon: "/images/logo.png",
+          icon: "/images/logo.svg",
         });
       }
       timeoutId = window.setTimeout(() => setOpen(true), 0);

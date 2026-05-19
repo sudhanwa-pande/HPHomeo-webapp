@@ -6,28 +6,28 @@ import { motion, useReducedMotion } from "framer-motion";
 const steps = [
   {
     num: 1,
-    icon: "/images/icon-doctor.png",
+    icon: "/images/icon-doctor.svg",
     title: "Browse Doctors",
     desc: "Find the right practitioner for you.",
     highlight: false,
   },
   {
     num: 2,
-    icon: "/images/icon-chat.png",
+    icon: "/images/icon-chat.svg",
     title: "Book Consultation",
     desc: "Pick a time that works, and schedule an online consultation at your convenience.",
     highlight: true,
   },
   {
     num: 3,
-    icon: "/images/icon-paper.png",
+    icon: "/images/icon-paper.svg",
     title: "Get Prescription",
     desc: "Digital prescription delivered instantly.",
     highlight: false,
   },
   {
     num: 4,
-    icon: "/images/icon-event.png",
+    icon: "/images/icon-event.svg",
     title: "Free Follow-Up",
     desc: "7 days of support after every visit.",
     highlight: false,

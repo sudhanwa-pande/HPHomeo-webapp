@@ -455,7 +455,7 @@ function CallState({ title, description, action }: { title: string; description:
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-bg px-6">
       <div className="w-full max-w-lg rounded-3xl border border-gray-200/80 bg-white px-8 py-10 text-center shadow-sm">
-        <Image src="/images/logo.png" alt="hpHomeo" width={130} height={42} className="mx-auto h-7 w-auto" />
+        <Image src="/images/logo.svg" alt="hpHomeo" width={130} height={42} className="mx-auto h-7 w-auto" />
         <p className="mt-6 text-lg font-semibold text-gray-900">{title}</p>
         <p className="mt-2 text-sm leading-relaxed text-gray-500">{description}</p>
         {action}

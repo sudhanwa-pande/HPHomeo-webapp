@@ -133,7 +133,7 @@ export default function DoctorLoginPage() {
         {/* ── Left panel — image ── */}
         <div className="relative hidden min-h-[600px] lg:block">
           <Image
-            src="/images/patient_login_page.png"
+            src="/images/patient_login_page.webp"
             alt="Homeopathy herbs and flowers"
             fill
             sizes="50vw"
@@ -145,7 +145,7 @@ export default function DoctorLoginPage() {
           <div className="absolute inset-0 flex flex-col p-10 xl:p-14">
             <Link href="/" className="block w-fit">
               <Image
-                src="/images/logo.png"
+                src="/images/logo.svg"
                 alt="eHomeo"
                 width={130}
                 height={36}
@@ -177,7 +177,7 @@ export default function DoctorLoginPage() {
           <div className="mb-8 lg:hidden">
             <Link href="/" className="block w-fit">
               <Image
-                src="/images/logo.png"
+                src="/images/logo.svg"
                 alt="eHomeo"
                 width={120}
                 height={32}

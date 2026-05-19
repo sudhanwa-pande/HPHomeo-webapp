@@ -209,7 +209,7 @@ function DoctorSidebar() {
             className="cursor-pointer group-data-[collapsible=icon]:hidden"
           >
             <Image
-              src="/images/logo.png"
+              src="/images/logo.svg"
               alt="hpHomeo"
               width={130}
               height={44}
@@ -221,7 +221,7 @@ function DoctorSidebar() {
             className="hidden cursor-pointer group-data-[collapsible=icon]:block"
           >
             <Image
-              src="/images/logo_wthout_text.png"
+              src="/images/logo_wthout_text.svg"
               alt="hpHomeo"
               width={40}
               height={40}

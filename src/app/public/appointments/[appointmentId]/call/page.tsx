@@ -646,7 +646,7 @@ function CallState({
       >
         <div className="rounded-[2rem] border border-white/[0.07] bg-white/[0.04] px-8 py-10 text-center backdrop-blur-sm">
           <Image
-            src="/images/logo.png"
+            src="/images/logo.svg"
             alt="eHomeo"
             width={130}
             height={42}

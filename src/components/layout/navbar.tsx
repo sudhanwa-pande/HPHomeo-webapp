@@ -62,7 +62,7 @@ export function Navbar() {
         {/* Logo */}
         <Link href="/" className="flex shrink-0 items-center" onClick={close}>
           <Image
-            src="/images/logo.png"
+            src="/images/logo.svg"
             alt="hpHomeo Logo"
             width={120}
             height={40}
@@ -151,7 +151,7 @@ export function Navbar() {
           <div className="flex items-center justify-between px-5 h-14 border-b border-border/30">
             <Link href="/" className="flex items-center" onClick={close}>
               <Image
-                src="/images/logo.png"
+                src="/images/logo.svg"
                 alt="hpHomeo Logo"
                 width={120}
                 height={40}

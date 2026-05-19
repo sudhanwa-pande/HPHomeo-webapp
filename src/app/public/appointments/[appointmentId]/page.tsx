@@ -360,10 +360,10 @@ function AppointmentPageClient() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3.5">
               <div className="flex h-11 w-11 items-center justify-center rounded-[1rem] bg-brand/[0.07] ring-1 ring-brand/10">
-                <Image src="/images/logo_wthout_text.png" alt="eHomeo" width={24} height={24} className="h-6 w-6" />
+                <Image src="/images/logo_wthout_text.svg" alt="eHomeo" width={24} height={24} className="h-6 w-6" />
               </div>
               <div>
-                <Image src="/images/logo.png" alt="eHomeo" width={124} height={40} className="h-7 w-auto" />
+                <Image src="/images/logo.svg" alt="eHomeo" width={124} height={40} className="h-7 w-auto" />
                 <p className="mt-0.5 text-[11px] font-medium text-brand-subtext/70 tracking-wide">
                   Private appointment access
                 </p>
@@ -705,7 +705,7 @@ function CenteredState({
   return (
     <>
       <div className="mb-8 flex items-center justify-center">
-        <Image src="/images/logo.png" alt="eHomeo" width={160} height={52} className="h-10 w-auto" />
+        <Image src="/images/logo.svg" alt="eHomeo" width={160} height={52} className="h-10 w-auto" />
       </div>
       <motion.div {...fadeUp(0.05)}>
         <Card className="rounded-[2rem] border-white/70 bg-white/95 shadow-[0_16px_60px_-28px_rgba(19,19,19,0.2)]">

@@ -104,7 +104,7 @@ function PatientSidebar() {
             className="cursor-pointer group-data-[collapsible=icon]:hidden"
           >
             <Image
-              src="/images/logo.png"
+              src="/images/logo.svg"
               alt="eHomeo"
               width={130}
               height={44}
@@ -116,7 +116,7 @@ function PatientSidebar() {
             className="hidden cursor-pointer group-data-[collapsible=icon]:block"
           >
             <Image
-              src="/images/logo_wthout_text.png"
+              src="/images/logo_wthout_text.svg"
               alt="eHomeo"
               width={36}
               height={36}

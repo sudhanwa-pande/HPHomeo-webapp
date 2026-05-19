@@ -169,7 +169,7 @@ export default function ForgotPasswordPage() {
         {/* Logo */}
         <div className="mb-8 flex justify-center">
           <Link href="/">
-            <Image src="/images/logo.png" alt="HPHomeo" width={130} height={36} className="h-8 w-auto" priority />
+            <Image src="/images/logo.svg" alt="HPHomeo" width={130} height={36} className="h-8 w-auto" priority />
           </Link>
         </div>
 

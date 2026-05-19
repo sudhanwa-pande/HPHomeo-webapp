@@ -616,7 +616,7 @@ export function ProfileWizard({
       {/* Top bar with logo */}
       <div className="flex items-center px-6 py-4 sm:px-8">
         <Image
-          src="/images/logo.png"
+          src="/images/logo.svg"
           alt="eHomeo"
           width={110}
           height={36}

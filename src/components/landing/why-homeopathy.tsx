@@ -5,22 +5,22 @@ import { motion, useReducedMotion } from "framer-motion";
 
 const cards = [
   {
-    icon: "/images/icon-leaf.png",
+    icon: "/images/icon-leaf.svg",
     title: "Treats Root Cause",
     desc: "Goes beyond symptom suppression by treating the underlying imbalances in your body.",
   },
   {
-    icon: "/images/icon-capsule.png",
+    icon: "/images/icon-capsule.svg",
     title: "Zero Side Effects",
     desc: "Natural remedies with no side effects, making them safe for long-term use including children.",
   },
   {
-    icon: "/images/icon-body.png",
+    icon: "/images/icon-body.svg",
     title: "Holistic Approach",
     desc: "Treats the whole person — mind, body and emotions — not just individual symptoms.",
   },
   {
-    icon: "/images/icon-pregnancy.png",
+    icon: "/images/icon-pregnancy.svg",
     title: "Safe for Mother & Child",
     desc: "Gentle and safe during pregnancy and for infants, supporting natural healing at every stage.",
   },

@@ -56,7 +56,7 @@ export function Hero() {
               <span className="w-[28px] sm:hidden shrink-0" aria-hidden="true" />
               <span className="text-brand">Homeopathy</span>
               <Image
-                src="/images/icons8-homeopathy-100.png"
+                src="/images/icons8-homeopathy-100.svg"
                 alt=""
                 width={80} 
                 height={80}
@@ -182,7 +182,7 @@ export function Hero() {
           {/* Image with bottom fade mask */}
           <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-border/30 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
             <Image
-              src="/images/hero-illustration.png"
+              src="/images/hero-illustration.webp"
               alt="Online Consultation Illustration"
               width={1120}
               height={900}
