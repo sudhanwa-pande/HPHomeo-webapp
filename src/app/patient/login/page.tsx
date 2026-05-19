@@ -39,10 +39,9 @@ export default function PatientLoginPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      router.refresh();
-      router.replace("/patient/dashboard");
+      window.location.replace("/patient/dashboard");
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -53,8 +52,7 @@ export default function PatientLoginPage() {
     api.get("/patient/auth/me").then(({ data }) => {
       if (cancelled) return;
       setAuth(data);
-      router.refresh();
-      router.replace("/patient/dashboard");
+      window.location.replace("/patient/dashboard");
     }).catch(() => {
       if (!cancelled) setSessionChecking(false);
     });
@@ -126,8 +124,7 @@ export default function PatientLoginPage() {
       });
       setAuth(data.patient);
       notifySuccess("Welcome!", "You've been signed in successfully.");
-      router.refresh();
-      router.replace("/patient/dashboard");
+      window.location.replace("/patient/dashboard");
     } catch (error) {
       notifyError("Verification failed", getApiError(error));
       setOtp(["", "", "", "", "", ""]);
