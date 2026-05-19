@@ -149,11 +149,11 @@ export function DoctorsPreview() {
     <section id="doctors" className="py-12 sm:py-16 md:py-20 bg-brand-bg">
       <div className="container-main">
         {/* Header */}
-        <motion.div className="mb-8 sm:mb-10" {...sectionFade}>
+        <motion.div className="text-center flex flex-col items-center mb-12 sm:mb-16" {...sectionFade}>
           <span className="inline-flex items-center rounded-full border border-brand/15 bg-white px-3.5 py-1 text-[11px] sm:text-[12px] font-semibold text-brand tracking-wide">
             Our Doctors
           </span>
-          <h2 className="mt-4 text-[clamp(1.4rem,3vw,2.25rem)] font-bold leading-[1.1] text-brand-dark">
+          <h2 className="mt-4 font-display text-[clamp(1.4rem,3vw,2.25rem)] font-bold leading-[1.1] text-brand-dark">
             Meet the Experts
           </h2>
         </motion.div>

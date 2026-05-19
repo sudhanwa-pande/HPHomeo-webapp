@@ -67,21 +67,21 @@ export function HealSection() {
       
       <div className="container-main relative z-10">
         {/* Header */}
-        <motion.div className="max-w-xl mb-10 sm:mb-14" {...fade(0)}>
+        <motion.div className="text-center flex flex-col items-center max-w-xl mx-auto mb-12 sm:mb-16" {...fade(0)}>
           <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3.5 py-1 text-[11px] sm:text-[12px] font-semibold text-brand-accent tracking-wide">
             Why Choose Us
           </span>
-          <h2 className="mt-4 text-[clamp(1.4rem,3vw,2.25rem)] font-bold leading-[1.1] text-white">
+          <h2 className="mt-4 font-display text-[clamp(1.4rem,3vw,2.25rem)] font-bold leading-[1.1] text-white">
             Built for Modern Healthcare
           </h2>
-          <p className="mt-3 text-[13.5px] sm:text-[14.5px] leading-relaxed text-white/70 max-w-md">
+          <p className="mt-3 text-[13.5px] sm:text-[14.5px] leading-relaxed text-white/70 max-w-md mx-auto">
             Access expert homeopathic care digitally — from home, while travelling, or anywhere else.
           </p>
         </motion.div>
 
         {/* Features — single horizontal row */}
         <motion.div
-          className="grid grid-cols-2 sm:grid-cols-4 gap-y-8 gap-x-6 sm:gap-x-8 lg:gap-x-12"
+          className="grid grid-cols-2 sm:grid-cols-4 gap-y-8 gap-x-6 sm:gap-x-8 lg:gap-x-12 text-center"
           variants={prefersReducedMotion ? undefined : containerVariants}
           initial="hidden"
           whileInView="visible"
@@ -90,11 +90,11 @@ export function HealSection() {
           {features.map((f) => (
             <motion.div
               key={f.title}
-              className="flex flex-col group"
+              className="flex flex-col items-center group"
               variants={prefersReducedMotion ? undefined : itemVariants}
             >
               <motion.div
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/10"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 transition-all duration-300 group-hover:scale-110 group-hover:bg-white/20"
                 whileHover={prefersReducedMotion ? {} : { scale: 1.2, rotate: -8 }}
                 transition={{ type: "spring", stiffness: 300, damping: 15 }}
               >

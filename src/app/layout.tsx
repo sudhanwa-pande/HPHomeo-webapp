@@ -1,21 +1,20 @@
 import type { Metadata } from "next";
-import { DM_Sans, Lora } from "next/font/google";
+import { Urbanist, Outfit } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { ErrorBoundary } from "@/components/error-boundary";
 
-const dmSans = DM_Sans({
+const urbanist = Urbanist({
   subsets: ["latin"],
   variable: "--font-sans",
   display: "swap",
-  weight: ["400", "500", "600"],
 });
 
-const lora = Lora({
+const outfit = Outfit({
   subsets: ["latin"],
   variable: "--font-display",
   display: "swap",
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
@@ -59,7 +58,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" data-scroll-behavior="smooth" className={`${dmSans.variable} ${lora.variable}`}>
+    <html lang="en" data-scroll-behavior="smooth" className={`${urbanist.variable} ${outfit.variable}`}>
       <body>
         <ErrorBoundary>
           <Providers>{children}</Providers>

@@ -49,18 +49,18 @@ export function Hero() {
                 })}
           >
             <span className="text-brand-accent">Heal</span>
-            <span className="bg-gradient-to-r from-brand-accent to-brand bg-clip-text text-transparent">
-              with
-            </span>
+            <span className="bg-gradient-to-r from-brand-accent to-brand bg-clip-text text-transparent">with</span>
             {/* Icon is absolutely positioned so it doesn't shift the text off-center on mobile */}
-            <span className="relative inline-flex items-center whitespace-nowrap">
+            <span className="inline-flex items-center gap-1.5 sm:gap-2 justify-center whitespace-nowrap">
+              {/* Invisible spacer on the left matching the icon size to keep text perfectly centered */}
+              <span className="w-[28px] sm:hidden shrink-0" aria-hidden="true" />
               <span className="text-brand">Homeopathy</span>
               <Image
                 src="/images/icons8-homeopathy-100.png"
                 alt=""
                 width={80} 
                 height={80}
-                className="absolute left-full ml-1 sm:ml-2 h-[36px] w-[36px] sm:h-[48px] sm:w-[48px] md:h-[64px] md:w-[64px] lg:h-[72px] lg:w-[72px] object-contain"
+                className="h-[28px] w-[28px] sm:h-[48px] sm:w-[48px] md:h-[64px] md:w-[64px] lg:h-[72px] lg:w-[72px] object-contain"
                 unoptimized
               />
             </span>

@@ -91,7 +91,7 @@ export function WhyHomeopathy() {
           {cards.map((card) => (
             <motion.div
               key={card.title}
-              className="group glass-card px-6 sm:px-7 py-8 sm:py-9 text-center flex flex-col items-center hover:-translate-y-1"
+              className="group glass-card px-6 sm:px-7 py-8 sm:py-9 text-center flex flex-col items-center hover:-translate-y-1.5 hover:border-brand/35 hover:shadow-[0_12px_30px_rgba(88,155,255,0.08)]"
               variants={prefersReducedMotion ? undefined : cardVariants}
             >
               {/* Icon */}
@@ -104,7 +104,7 @@ export function WhyHomeopathy() {
                   alt={card.title}
                   width={48}
                   height={48}
-                  className="w-10 h-10 sm:w-12 sm:h-12"
+                  className="w-10 h-10 sm:w-12 sm:h-12 transition-all duration-300 group-hover:scale-110 group-hover:rotate-6"
                   unoptimized
                 />
               </motion.div>

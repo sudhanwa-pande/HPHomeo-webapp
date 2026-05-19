@@ -107,7 +107,7 @@ export function Journey() {
             >
               {/* Step number in circle */}
               <motion.div
-                className={`flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-full text-[14px] sm:text-[15px] font-bold ${
+                className={`flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-full text-[14px] sm:text-[15px] font-bold transition-all duration-300 group-hover:scale-110 ${
                   step.highlight
                     ? "bg-white text-brand border-2 border-white"
                     : "border-2 border-brand text-brand"
@@ -128,7 +128,7 @@ export function Journey() {
                   alt={step.title}
                   width={36}
                   height={36}
-                  className={`mt-5 sm:w-11 sm:h-11 ${step.highlight ? "brightness-0 invert" : ""}`}
+                  className={`mt-5 sm:w-11 sm:h-11 transition-all duration-300 group-hover:scale-110 group-hover:-rotate-3 ${step.highlight ? "brightness-0 invert" : ""}`}
                   unoptimized
                 />
               </motion.div>
