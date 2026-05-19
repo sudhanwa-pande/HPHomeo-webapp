@@ -106,14 +106,18 @@ function DoctorsContent() {
       </div>
 
       {/* Expanded doctor detail sheet */}
-      <DoctorDetailSheet
-        doctor={selectedDoctor}
-        onClose={() => setSelectedDoctor(null)}
-        onBook={(id) => {
-          setSelectedDoctor(null);
-          router.push(`/patient/book/${id}`);
-        }}
-      />
+      <AnimatePresence>
+        {selectedDoctor && (
+          <DoctorDetailSheet
+            doctor={selectedDoctor}
+            onClose={() => setSelectedDoctor(null)}
+            onBook={(id) => {
+              setSelectedDoctor(null);
+              router.push(`/patient/book/${id}`);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </PatientShell>
   );
 }
@@ -206,15 +210,11 @@ function DoctorCard({
           >
             Book <ArrowRight className="h-3 w-3" />
           </Button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClick();
-            }}
-            className="text-[11.5px] font-semibold text-brand/80 hover:text-brand hover:underline transition-colors cursor-pointer"
+          <span
+            className="text-[11.5px] font-semibold text-brand/80 hover:text-brand hover:underline transition-colors cursor-pointer select-none"
           >
             View profile
-          </button>
+          </span>
         </div>
       </div>
     </div>
@@ -246,10 +246,8 @@ function DoctorDetailSheet({
   const specialization = doctor.specialization || "General Physician";
 
   return (
-    <AnimatePresence>
-      {doctor && (
-        <>
-          {/* Backdrop */}
+    <>
+      {/* Backdrop */}
           <motion.div
             key="backdrop"
             initial={{ opacity: 0 }}
@@ -389,9 +387,7 @@ function DoctorDetailSheet({
               </div>
             </div>
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+    </>
   );
 }
 

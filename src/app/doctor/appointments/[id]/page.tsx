@@ -538,6 +538,8 @@ function DetailContent() {
     },
     onSuccess: (blob) => {
       if (previewAbortRef.current?.signal.aborted) return;
+      const isMobile = typeof window !== "undefined" && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+      if (isMobile) return; // handled in handleTogglePreview
       setPreviewBlobUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return URL.createObjectURL(blob);
@@ -684,7 +686,63 @@ function DetailContent() {
       notifyInfo("Preview unavailable", "Only for confirmed/completed appointments.");
       return;
     }
-    await previewMutation.mutateAsync(latestPayload);
+
+    const isMobile = typeof window !== "undefined" && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    let newWindow: Window | null = null;
+    if (isMobile) {
+      newWindow = window.open("", "_blank");
+      if (newWindow) {
+        newWindow.document.write(`
+          <html>
+            <head>
+              <title>Prescription Preview...</title>
+              <style>
+                body {
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  justify-content: center;
+                  height: 100vh;
+                  margin: 0;
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                  background-color: #f8fafc;
+                  color: #0f172a;
+                }
+                .spinner {
+                  border: 3px solid #e2e8f0;
+                  border-top: 3px solid #16a34a;
+                  border-radius: 50%;
+                  width: 24px;
+                  height: 24px;
+                  animation: spin 1s linear infinite;
+                  margin-bottom: 12px;
+                }
+                @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+                }
+              </style>
+            </head>
+            <body>
+              <div class="spinner"></div>
+              <p style="font-size: 14px; font-weight: 500; color: #475569;">Building preview, please wait...</p>
+            </body>
+          </html>
+        `);
+        newWindow.document.close();
+      }
+    }
+
+    try {
+      const blob = await previewMutation.mutateAsync(latestPayload);
+      if (isMobile && newWindow) {
+        const objectUrl = URL.createObjectURL(blob);
+        newWindow.location.href = objectUrl;
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 15000);
+      }
+    } catch (error) {
+      if (newWindow) newWindow.close();
+    }
   };
 
   const applyTemplate = (template: PrescriptionTemplate) => {
