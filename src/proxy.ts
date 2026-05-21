@@ -38,7 +38,11 @@ export default function proxy(request: NextRequest) {
 
   const isAuthPage =
     pathname.startsWith("/doctor/login") ||
+    pathname.startsWith("/doctor/register") ||
+    pathname.startsWith("/doctor/forgot-password") ||
+    pathname.startsWith("/doctor/verify") ||
     pathname.startsWith("/patient/login") ||
+    pathname.startsWith("/patient/register") ||
     pathname.startsWith("/admin/login");
 
   const isDoctorRoute = pathname.startsWith("/doctor");
