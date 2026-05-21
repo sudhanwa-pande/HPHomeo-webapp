@@ -8,6 +8,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Turnstile } from "@marsidev/react-turnstile";
 
 import api, { getApiError } from "@/lib/api";
 import { notifyError, notifySuccess } from "@/lib/notify";
@@ -47,6 +48,7 @@ export default function DoctorRegisterPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
   const {
     register,
@@ -55,10 +57,15 @@ export default function DoctorRegisterPage() {
   } = useForm<RegisterForm>({ resolver: zodResolver(registerSchema) });
 
   async function onSubmit(values: RegisterForm) {
+    if (!turnstileToken) {
+      notifyError("Verification required", "Please complete the security check.");
+      return;
+    }
+
     setLoading(true);
     try {
       const { confirm_password: _, ...body } = values;
-      await api.post("/auth/register", body);
+      await api.post("/auth/register", { ...body, turnstileToken });
       notifySuccess(
         "Account created",
         "Your profile is pending approval. Sign in after your account is approved.",
@@ -263,6 +270,15 @@ export default function DoctorRegisterPage() {
                       <p className="text-[12px] text-[#C45454]">{errors.confirm_password.message}</p>
                     )}
                   </div>
+                </div>
+
+                <div className="flex justify-center pt-2 pb-4">
+                  <Turnstile
+                    siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ""}
+                    onSuccess={(token) => setTurnstileToken(token)}
+                    onError={() => setTurnstileToken(null)}
+                    onExpire={() => setTurnstileToken(null)}
+                  />
                 </div>
 
                 <div className="pt-1">
