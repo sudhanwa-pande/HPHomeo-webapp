@@ -35,11 +35,7 @@ export default function DoctorLoginPage() {
   const { setAuth, isAuthenticated } = useDoctorAuth();
   const [showPassword, setShowPassword] = useState(false);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      window.location.replace("/doctor/dashboard");
-    }
-  }, [isAuthenticated]);
+
 
   const [loginLoading, setLoginLoading] = useState(false);
   const [verifyLoading, setVerifyLoading] = useState(false);
@@ -78,7 +74,7 @@ export default function DoctorLoginPage() {
       const loginData = data as DoctorLoginResponse;
       setAuth(loginData.doctor);
       notifySuccess("Welcome back", "Your dashboard is ready.");
-      window.location.replace(!loginData.doctor.profile_complete ? "/doctor/profile" : "/doctor/dashboard");
+      router.replace(!loginData.doctor.profile_complete ? "/doctor/profile" : "/doctor/dashboard");
     } catch (error) {
       notifyError("Couldn't sign you in", getApiError(error));
     } finally {
@@ -102,7 +98,7 @@ export default function DoctorLoginPage() {
       resetVerifyForm({ code: "" });
       setAuth(data.doctor);
       notifySuccess("Verification complete", "You're signed in and ready to continue.");
-      window.location.replace(!data.doctor.profile_complete ? "/doctor/profile" : "/doctor/dashboard");
+      router.replace(!data.doctor.profile_complete ? "/doctor/profile" : "/doctor/dashboard");
     } catch (error) {
       notifyError("Couldn't verify code", getApiError(error));
     } finally {

@@ -75,7 +75,7 @@ export default function AdminLoginPage() {
     try {
       await api.post("/admin/auth/verify", values);
       notifySuccess("Admin session verified", "You're cleared to access admin controls.");
-      window.location.replace("/admin/dashboard");
+      router.replace("/admin/dashboard");
     } catch (error) {
       const message = getApiError(error);
       if (message === "Admin TOTP setup required") {

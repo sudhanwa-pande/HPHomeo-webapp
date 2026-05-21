@@ -1,34 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-/**
- * Lightweight server-side guard: if the user has no auth cookie at all,
- * redirect immediately instead of loading the full page bundle and letting
- * the client-side AuthGuard handle it after a flash of content.
- *
- * This does NOT validate the token — it only checks for its presence.
- * Full verification still happens client-side via /auth/me.
- */
-
-const DOCTOR_PROTECTED = [
-  "/doctor/dashboard", "/doctor/profile", "/doctor/appointments",
-  "/doctor/patients", "/doctor/availability", "/doctor/prescriptions",
-  "/doctor/call",
-];
-const ADMIN_PROTECTED = ["/admin"];
-const PATIENT_PROTECTED = [
-  "/patient/dashboard", "/patient/appointments", "/patient/profile",
-  "/patient/prescriptions", "/patient/receipts", "/patient/book",
-  "/patient/doctors",
-];
-
-function matchesAny(pathname: string, prefixes: string[]) {
-  return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+// 0-dependency JWT decoder for Edge runtime
+function jwtDecode(token: string) {
+  try {
+    const base64Url = token.split(".")[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    return null;
+  }
 }
 
-// Routes that should never be redirected (login / register / public)
-const PUBLIC_ROUTES = ["/doctor/login", "/doctor/register", "/doctor/verify", "/patient/login"];
-
-// Bare path → dashboard redirects (previously in proxy.ts)
+// Bare path → dashboard redirects
 const BARE_REDIRECTS: Record<string, string> = {
   "/doctor": "/doctor/dashboard",
   "/patient": "/patient/dashboard",
@@ -44,31 +34,90 @@ export default function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL(redirect, request.url));
   }
 
-  // Never redirect login/register pages
-  if (matchesAny(pathname, PUBLIC_ROUTES)) {
-    return NextResponse.next();
-  }
+  const token = request.cookies.get("access_token");
 
-  // Doctor / admin routes — expect an access_token cookie
-  if (matchesAny(pathname, [...DOCTOR_PROTECTED, ...ADMIN_PROTECTED])) {
-    const hasToken = request.cookies.has("doctor_access_token");
-    if (!hasToken) {
-      const loginUrl = request.nextUrl.clone();
-      loginUrl.pathname = "/doctor/login";
-      loginUrl.search = "";
-      return NextResponse.redirect(loginUrl);
+  const isAuthPage =
+    pathname.startsWith("/doctor/login") ||
+    pathname.startsWith("/patient/login") ||
+    pathname.startsWith("/admin/login");
+
+  const isDoctorRoute = pathname.startsWith("/doctor");
+  const isPatientRoute = pathname.startsWith("/patient");
+  const isAdminRoute = pathname.startsWith("/admin");
+
+  // If token exists, validate it and route intelligently
+  const isProtectedOrAuth = isAuthPage || isDoctorRoute || isPatientRoute || isAdminRoute;
+
+  if (token && isProtectedOrAuth) {
+    const decoded = jwtDecode(token.value);
+    
+    // Check token expiration
+    if (!decoded || (decoded.exp && decoded.exp * 1000 < Date.now())) {
+      // Token expired -> clear cookie and treat as no token
+      if (isAuthPage) {
+        const res = NextResponse.next();
+        res.cookies.delete("access_token");
+        return res;
+      }
+
+      let res;
+      if (isDoctorRoute) {
+        res = NextResponse.redirect(new URL("/doctor/login", request.url));
+      } else if (isPatientRoute) {
+        res = NextResponse.redirect(new URL("/patient/login", request.url));
+      } else if (isAdminRoute) {
+        res = NextResponse.redirect(new URL("/admin/login", request.url));
+      } else {
+        res = NextResponse.next();
+      }
+      res.cookies.delete("access_token");
+      return res;
+    }
+
+    const role = decoded.role;
+
+    // Logged-in users hitting auth pages get role-aware redirect
+    if (isAuthPage) {
+      if (role === "patient") {
+        return NextResponse.redirect(new URL("/patient/dashboard", request.url));
+      }
+      if (role === "doctor") {
+        return NextResponse.redirect(new URL("/doctor/dashboard", request.url));
+      }
+      if (role === "admin") {
+        return NextResponse.redirect(new URL("/admin/dashboard", request.url));
+      }
+
+      // Fallback for unknown role
+      const res = NextResponse.redirect(new URL("/doctor/login", request.url));
+      res.cookies.delete("access_token");
+      return res;
+    }
+
+    if (isDoctorRoute && role !== "doctor") {
+      return NextResponse.redirect(new URL("/doctor/login", request.url));
+    }
+    if (isPatientRoute && role !== "patient") {
+      return NextResponse.redirect(new URL("/patient/login", request.url));
+    }
+    if (isAdminRoute && role !== "admin") {
+      return NextResponse.redirect(new URL("/admin/login", request.url));
     }
   }
 
-  // Patient routes — expect a patient_access_token cookie
-  if (matchesAny(pathname, PATIENT_PROTECTED)) {
-    const hasToken = request.cookies.has("patient_access_token");
-    if (!hasToken) {
-      const loginUrl = request.nextUrl.clone();
-      loginUrl.pathname = "/patient/login";
-      loginUrl.search = "";
-      return NextResponse.redirect(loginUrl);
-    }
+  // Protect doctor routes
+  if (!token && isDoctorRoute && !isAuthPage) {
+    return NextResponse.redirect(new URL("/doctor/login", request.url));
+  }
+
+  // Protect patient routes
+  if (!token && isPatientRoute && !isAuthPage) {
+    return NextResponse.redirect(new URL("/patient/login", request.url));
+  }
+
+  // Protect admin routes
+  if (!token && isAdminRoute && !isAuthPage) {
+    return NextResponse.redirect(new URL("/admin/login", request.url));
   }
 
   return NextResponse.next();

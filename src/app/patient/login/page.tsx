@@ -26,7 +26,7 @@ function WhatsAppIcon({ className }: { className?: string }) {
 export default function PatientLoginPage() {
   const router = useRouter();
   const { isAuthenticated, setAuth } = usePatientAuth();
-  const [sessionChecking, setSessionChecking] = useState(true);
+
 
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
@@ -37,28 +37,7 @@ export default function PatientLoginPage() {
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
   const timerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      window.location.replace("/patient/dashboard");
-    }
-  }, [isAuthenticated]);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      setSessionChecking(false);
-      return;
-    }
-    let cancelled = false;
-    api.get("/patient/auth/me").then(({ data }) => {
-      if (cancelled) return;
-      setAuth(data);
-      window.location.replace("/patient/dashboard");
-    }).catch(() => {
-      if (!cancelled) setSessionChecking(false);
-    });
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, setAuth]);
 
   useEffect(() => {
     if (resendTimer <= 0) return;
@@ -124,7 +103,7 @@ export default function PatientLoginPage() {
       });
       setAuth(data.patient);
       notifySuccess("Welcome!", "You've been signed in successfully.");
-      window.location.replace("/patient/dashboard");
+      router.replace("/patient/dashboard");
     } catch (error) {
       notifyError("Verification failed", getApiError(error));
       setOtp(["", "", "", "", "", ""]);
@@ -259,11 +238,6 @@ export default function PatientLoginPage() {
           <div className="flex flex-1 flex-col justify-center">
             <div className="mx-auto w-full max-w-[400px]">
 
-              {sessionChecking ? (
-                <div className="flex min-h-[260px] items-center justify-center">
-                  <Spinner size="lg" />
-                </div>
-              ) : (
                 <div className="relative min-h-[320px]">
                   {/* ── Step 1: Phone ── */}
                   <div
@@ -415,7 +389,6 @@ export default function PatientLoginPage() {
                     </div>
                   </div>
                 </div>
-              )}
             </div>
           </div>
 
