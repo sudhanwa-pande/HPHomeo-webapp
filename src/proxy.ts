@@ -34,7 +34,9 @@ export default function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL(redirect, request.url));
   }
 
-  const token = request.cookies.get("access_token");
+  const isDoctorRoute = pathname.startsWith("/doctor");
+  const isPatientRoute = pathname.startsWith("/patient");
+  const isAdminRoute = pathname.startsWith("/admin");
 
   const isAuthPage =
     pathname.startsWith("/doctor/login") ||
@@ -45,9 +47,14 @@ export default function proxy(request: NextRequest) {
     pathname.startsWith("/patient/register") ||
     pathname.startsWith("/admin/login");
 
-  const isDoctorRoute = pathname.startsWith("/doctor");
-  const isPatientRoute = pathname.startsWith("/patient");
-  const isAdminRoute = pathname.startsWith("/admin");
+  let tokenName = "";
+  if (isPatientRoute) {
+    tokenName = "patient_access_token";
+  } else if (isDoctorRoute || isAdminRoute) {
+    tokenName = "doctor_access_token";
+  }
+
+  const token = tokenName ? request.cookies.get(tokenName) : undefined;
 
   // If token exists, validate it and route intelligently
   const isProtectedOrAuth = isAuthPage || isDoctorRoute || isPatientRoute || isAdminRoute;
@@ -60,7 +67,7 @@ export default function proxy(request: NextRequest) {
       // Token expired -> clear cookie and treat as no token
       if (isAuthPage) {
         const res = NextResponse.next();
-        res.cookies.delete("access_token");
+        if (tokenName) res.cookies.delete(tokenName);
         return res;
       }
 
@@ -74,7 +81,7 @@ export default function proxy(request: NextRequest) {
       } else {
         res = NextResponse.next();
       }
-      res.cookies.delete("access_token");
+      if (tokenName) res.cookies.delete(tokenName);
       return res;
     }
 
@@ -94,7 +101,7 @@ export default function proxy(request: NextRequest) {
 
       // Fallback for unknown role
       const res = NextResponse.redirect(new URL("/doctor/login", request.url));
-      res.cookies.delete("access_token");
+      if (tokenName) res.cookies.delete(tokenName);
       return res;
     }
 
