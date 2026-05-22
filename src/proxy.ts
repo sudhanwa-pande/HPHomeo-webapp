@@ -1,22 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-
-// 0-dependency JWT decoder for Edge runtime
-function jwtDecode(token: string) {
-  try {
-    const base64Url = token.split(".")[1];
-    if (!base64Url) return null;
-    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonPayload = decodeURIComponent(
-      atob(base64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
-    return JSON.parse(jsonPayload);
-  } catch (e) {
-    return null;
-  }
-}
+import { jwtVerify } from "jose";
+import * as Sentry from "@sentry/nextjs";
 
 // Bare path → dashboard redirects
 const BARE_REDIRECTS: Record<string, string> = {
@@ -25,18 +9,42 @@ const BARE_REDIRECTS: Record<string, string> = {
   "/admin": "/admin/dashboard",
 };
 
-export default function proxy(request: NextRequest) {
+const getJwtSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) return null;
+  return new TextEncoder().encode(secret);
+};
+
+// Helper to verify token (strict enforcement)
+async function verifyToken(token: string) {
+  const secret = getJwtSecret();
+  if (!secret) {
+    console.error("CRITICAL: JWT_SECRET is missing in environment. Denying access.");
+    return null;
+  }
+  try {
+    const { payload } = await jwtVerify(token, secret, {
+      algorithms: ["HS256"],
+      issuer: "hphomeo-backend",
+      audience: "hphomeo-frontend",
+    });
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Bare path redirects (e.g. /doctor → /doctor/dashboard)
   const redirect = BARE_REDIRECTS[pathname];
   if (redirect) {
     return NextResponse.redirect(new URL(redirect, request.url));
   }
 
-  const isDoctorRoute = pathname.startsWith("/doctor");
-  const isPatientRoute = pathname.startsWith("/patient");
-  const isAdminRoute = pathname.startsWith("/admin");
+  const isDoctorRoute = pathname === "/doctor" || pathname.startsWith("/doctor/");
+  const isPatientRoute = pathname === "/patient" || pathname.startsWith("/patient/");
+  const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
 
   const isAuthPage =
     pathname.startsWith("/doctor/login") ||
@@ -44,91 +52,115 @@ export default function proxy(request: NextRequest) {
     pathname.startsWith("/doctor/forgot-password") ||
     pathname.startsWith("/doctor/verify") ||
     pathname.startsWith("/patient/login") ||
-    pathname.startsWith("/patient/register") ||
-    pathname.startsWith("/admin/login");
+    pathname.startsWith("/patient/register");
 
-  let tokenName = "";
-  if (isPatientRoute) {
-    tokenName = "patient_access_token";
-  } else if (isDoctorRoute || isAdminRoute) {
-    tokenName = "doctor_access_token";
-  }
-
-  const token = tokenName ? request.cookies.get(tokenName) : undefined;
-
-  // If token exists, validate it and route intelligently
   const isProtectedOrAuth = isAuthPage || isDoctorRoute || isPatientRoute || isAdminRoute;
 
-  if (token && isProtectedOrAuth) {
-    const decoded = jwtDecode(token.value);
-    
-    // Check token expiration
-    if (!decoded || (decoded.exp && decoded.exp * 1000 < Date.now())) {
-      // Token expired -> clear cookie and treat as no token
-      if (isAuthPage) {
-        const res = NextResponse.next();
-        if (tokenName) res.cookies.delete(tokenName);
-        return res;
-      }
+  if (!isProtectedOrAuth) {
+    return NextResponse.next();
+  }
 
-      let res;
-      if (isDoctorRoute) {
-        res = NextResponse.redirect(new URL("/doctor/login", request.url));
-      } else if (isPatientRoute) {
-        res = NextResponse.redirect(new URL("/patient/login", request.url));
-      } else if (isAdminRoute) {
-        res = NextResponse.redirect(new URL("/admin/login", request.url));
-      } else {
-        res = NextResponse.next();
-      }
-      if (tokenName) res.cookies.delete(tokenName);
+  const doctorToken = request.cookies.get("doctor_access_token")?.value;
+  const adminToken = request.cookies.get("admin_session_token")?.value;
+  const patientToken = request.cookies.get("patient_access_token")?.value;
+
+  // Pre-verify tokens to avoid multiple expensive checks
+  const doctorClaims = doctorToken ? await verifyToken(doctorToken) : null;
+  const adminClaims = adminToken ? await verifyToken(adminToken) : null;
+  const patientClaims = patientToken ? await verifyToken(patientToken) : null;
+
+  // --- ADMIN ROUTE ENFORCEMENT (Strict, Verified) ---
+  if (isAdminRoute) {
+    if (!doctorClaims || doctorClaims.role !== "doctor") {
+      const res = NextResponse.redirect(new URL("/doctor/login", request.url));
+      if (doctorToken) res.cookies.delete("doctor_access_token");
+      if (adminToken) res.cookies.delete("admin_session_token");
       return res;
     }
 
-    const role = decoded.role;
+    let isStepUpValid = false;
 
-    // Logged-in users hitting auth pages get role-aware redirect
-    if (isAuthPage) {
-      if (role === "patient") {
-        return NextResponse.redirect(new URL("/patient/dashboard", request.url));
+    if (adminClaims && adminClaims.session_type === "admin_reauth") {
+      const amr = adminClaims.amr;
+      const hasTotp = Array.isArray(amr) ? amr.includes("totp") : amr === "totp";
+
+      if (hasTotp) {
+        if (adminClaims.sub === doctorClaims.sub) {
+          isStepUpValid = true;
+        } else {
+          // Token Binding Failed! Log to Sentry
+          Sentry.captureMessage("Admin Step-Up Security Event: Token Binding Failed", {
+            level: "warning",
+            tags: { security: "step-up-auth" },
+            extra: { path: pathname, adminSub: adminClaims.sub, doctorSub: doctorClaims.sub }
+          });
+          console.warn("Admin step-up failed", {
+            reason: "sub_mismatch",
+            path: pathname,
+          });
+        }
       }
-      if (role === "doctor") {
-        return NextResponse.redirect(new URL("/doctor/dashboard", request.url));
-      }
-      if (role === "admin") {
+    }
+
+    if (isStepUpValid) {
+      if (pathname === "/admin/login") {
         return NextResponse.redirect(new URL("/admin/dashboard", request.url));
       }
+      return NextResponse.next();
+    }
 
-      // Fallback for unknown role
-      const res = NextResponse.redirect(new URL("/doctor/login", request.url));
-      if (tokenName) res.cookies.delete(tokenName);
+    // Not step-up verified or expired/invalid
+    // If they have an adminToken but it failed validation, clear it to prevent stale cookie issues
+    const needsCookieCleanup = adminToken && !isStepUpValid;
+
+    if (pathname === "/admin/login") {
+      const res = NextResponse.next();
+      if (needsCookieCleanup) res.cookies.delete("admin_session_token");
       return res;
     }
 
-    if (isDoctorRoute && role !== "doctor") {
-      return NextResponse.redirect(new URL("/doctor/login", request.url));
+    // Expiry drift handling: pass reauth=true
+    const url = new URL("/admin/login", request.url);
+    if (adminToken) {
+      url.searchParams.set("reauth", "true");
     }
-    if (isPatientRoute && role !== "patient") {
-      return NextResponse.redirect(new URL("/patient/login", request.url));
-    }
-    if (isAdminRoute && role !== "admin") {
-      return NextResponse.redirect(new URL("/admin/login", request.url));
-    }
+    const res = NextResponse.redirect(url);
+    if (needsCookieCleanup) res.cookies.delete("admin_session_token");
+    return res;
   }
 
-  // Protect doctor routes
-  if (!token && isDoctorRoute && !isAuthPage) {
-    return NextResponse.redirect(new URL("/doctor/login", request.url));
+  // --- DOCTOR ROUTE ENFORCEMENT ---
+  if (isDoctorRoute && !isAuthPage) {
+    if (!doctorClaims || doctorClaims.role !== "doctor") {
+      const res = NextResponse.redirect(new URL("/doctor/login", request.url));
+      if (doctorToken) res.cookies.delete("doctor_access_token");
+      if (adminToken) res.cookies.delete("admin_session_token"); // Ensure step-up is killed too
+      return res;
+    }
+    return NextResponse.next();
   }
 
-  // Protect patient routes
-  if (!token && isPatientRoute && !isAuthPage) {
-    return NextResponse.redirect(new URL("/patient/login", request.url));
+  // --- PATIENT ROUTE ENFORCEMENT ---
+  if (isPatientRoute && !isAuthPage) {
+    if (!patientClaims || patientClaims.role !== "patient") {
+      const res = NextResponse.redirect(new URL("/patient/login", request.url));
+      if (patientToken) res.cookies.delete("patient_access_token");
+      return res;
+    }
+    return NextResponse.next();
   }
 
-  // Protect admin routes
-  if (!token && isAdminRoute && !isAuthPage) {
-    return NextResponse.redirect(new URL("/admin/login", request.url));
+  // --- AUTH PAGES LOGIC ---
+  if (isAuthPage) {
+    // Check patient token
+    if (patientClaims && patientClaims.role === "patient" && (pathname.startsWith("/patient/login") || pathname.startsWith("/patient/register"))) {
+      return NextResponse.redirect(new URL("/patient/dashboard", request.url));
+    }
+    // Check doctor token
+    if (doctorClaims && doctorClaims.role === "doctor" && (pathname.startsWith("/doctor/login") || pathname.startsWith("/doctor/register") || pathname.startsWith("/doctor/verify"))) {
+      return NextResponse.redirect(new URL("/doctor/dashboard", request.url));
+    }
+    return NextResponse.next();
   }
 
   return NextResponse.next();
