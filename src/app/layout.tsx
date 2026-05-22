@@ -50,6 +50,9 @@ export const metadata: Metadata = {
     siteName: "hpHomeo",
     type: "website",
   },
+  alternates: {
+    canonical: "https://hphomeo.com",
+  },
 };
 
 export default function RootLayout({
