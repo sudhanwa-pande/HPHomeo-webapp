@@ -131,6 +131,7 @@ export interface AvailabilityException {
 
 // Prescription
 export interface RxItem {
+  _clientId?: string;
   name: string;
   dosage?: string;
   frequency?: string;

@@ -20,9 +20,9 @@ export const LIVEKIT_AUDIO_CAPTURE_OPTIONS: AudioCaptureOptions = {
 };
 
 export const LIVEKIT_ROOM_OPTIONS: RoomOptions = {
-  adaptiveStream: true,
+  adaptiveStream: { pixelDensity: "screen" },
   audioCaptureDefaults: LIVEKIT_AUDIO_CAPTURE_OPTIONS,
-  disconnectOnPageLeave: true,
+  disconnectOnPageLeave: false,
   dynacast: true,
   publishDefaults: {
     audioPreset: AudioPresets.speech,
@@ -204,7 +204,10 @@ export async function prepareMediaChoices({
     await probeMedia({ audio: audioConstraints, video: videoConstraints });
     return { audio, video, warning: null as string | null };
   } catch (error) {
-    if (!isMissingDeviceError(error)) {
+    const isMissing = isMissingDeviceError(error);
+    const isLocked = error instanceof Error && (error.name === "NotReadableError" || error.name === "NotAllowedError");
+
+    if (!isMissing && !isLocked) {
       throw error;
     }
 
@@ -217,7 +220,9 @@ export async function prepareMediaChoices({
         return {
           audio: true,
           video: false,
-          warning: "No camera detected. Joined with microphone only.",
+          warning: isLocked 
+            ? "Camera is blocked or occupied by another app. Joined with microphone only." 
+            : "No camera detected. Joined with microphone only.",
         };
       } catch {
         try {
@@ -225,14 +230,28 @@ export async function prepareMediaChoices({
           return {
             audio: false,
             video: true,
-            warning: "No microphone detected. Joined with camera only.",
+            warning: isLocked
+              ? "Microphone is blocked or occupied. Joined with camera only."
+              : "No microphone detected. Joined with camera only.",
           };
         } catch {
-          throw error;
+          // Both failed, return no media but don't crash
+          return {
+            audio: false,
+            video: false,
+            warning: "Camera and microphone are unavailable. Joined as viewer.",
+          };
         }
       }
     }
 
-    throw error;
+    // If only one was requested and it failed due to lock/missing, return false for it
+    return {
+      audio: false,
+      video: false,
+      warning: isLocked 
+        ? "Requested media is blocked or occupied. Joined as viewer." 
+        : "Requested media device not found. Joined as viewer.",
+    };
   }
 }

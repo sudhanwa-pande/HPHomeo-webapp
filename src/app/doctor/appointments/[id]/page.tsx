@@ -88,8 +88,19 @@ function blankToUndefined(value?: string) {
   return trimmed ? trimmed : undefined;
 }
 
+
+function createEmptyPayload(): PrescriptionPayload {
+  return {
+    chief_complaints: "",
+    diagnosis: "",
+    advice: "",
+    items: [{ ...EMPTY_RX_ITEM, _clientId: crypto.randomUUID() }],
+  };
+}
+
 function normalizeItem(item?: RxItem | null): RxItem {
   return {
+    _clientId: item?._clientId ?? crypto.randomUUID(),
     name: item?.name ?? "",
     dosage: item?.dosage ?? "",
     frequency: item?.frequency ?? "",
@@ -98,21 +109,12 @@ function normalizeItem(item?: RxItem | null): RxItem {
   };
 }
 
-function createEmptyPayload(): PrescriptionPayload {
-  return {
-    chief_complaints: "",
-    diagnosis: "",
-    advice: "",
-    items: [{ ...EMPTY_RX_ITEM }],
-  };
-}
-
 function normalizePayload(
   payload?: Partial<PrescriptionPayload> | null,
 ): PrescriptionPayload {
   const items = payload?.items?.length
     ? payload.items.map(normalizeItem)
-    : [{ ...EMPTY_RX_ITEM }];
+    : [{ ...EMPTY_RX_ITEM, _clientId: crypto.randomUUID() }];
   return {
     chief_complaints: payload?.chief_complaints ?? "",
     diagnosis: payload?.diagnosis ?? "",
@@ -619,7 +621,7 @@ function DetailContent() {
   const addItem = useCallback(() => {
     setDraftPayload((current) => {
       const source = current ?? serverPayload;
-      return { ...source, items: [...source.items, { ...EMPTY_RX_ITEM }] };
+      return { ...source, items: [...source.items, { ...EMPTY_RX_ITEM, _clientId: crypto.randomUUID() }] };
     });
   }, [serverPayload]);
 
@@ -627,7 +629,7 @@ function DetailContent() {
     setDraftPayload((current) => {
       const source = current ?? serverPayload;
       const next = [...source.items];
-      next.splice(index + 1, 0, { ...source.items[index] });
+      next.splice(index + 1, 0, { ...source.items[index], _clientId: crypto.randomUUID() });
       return { ...source, items: next };
     });
   }, [serverPayload]);
@@ -638,7 +640,7 @@ function DetailContent() {
       const next = source.items.filter((_, i) => i !== index);
       return {
         ...source,
-        items: next.length ? next : [{ ...EMPTY_RX_ITEM }],
+        items: next.length ? next : [{ ...EMPTY_RX_ITEM, _clientId: crypto.randomUUID() }],
       };
     });
   }, [serverPayload]);
@@ -1758,7 +1760,7 @@ function PrescriptionSection({
             <div className="space-y-3.5">
               {payload.items.map((item, index) => (
                 <MedicineCard
-                  key={`medicine-${index}`}
+                  key={item._clientId || `medicine-${index}`}
                   item={item}
                   index={index}
                   disabled={isFinalized || !canManage}

@@ -11,6 +11,7 @@ import {
   useRemoteParticipants,
   useTracks,
   VideoTrack,
+  TrackToggle,
 } from "@livekit/components-react";
 import { isTrackReference, type TrackReference } from "@livekit/components-core";
 import { ConnectionState, Track } from "livekit-client";
@@ -43,6 +44,8 @@ import { hapticPulse, hapticSuccess, hapticTap, hapticWarning } from "@/lib/hapt
 import { notifyApiError, notifyError, notifyInfo, notifySuccess } from "@/lib/notify";
 import { playIncomingMessageSound } from "@/lib/sound";
 import { cn } from "@/lib/utils";
+import { useWakeLock } from "@/hooks/use-wake-lock";
+import { ConnectionObserver } from "@/components/call/connection-observer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -80,6 +83,7 @@ export function ConsultationCallPanel({
   onMaximize?: () => void;
 }) {
   const queryClient = useQueryClient();
+  useWakeLock();
   const [tokenData, setTokenData] = useState<VideoTokenResponse | null>(null);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -114,7 +118,7 @@ export function ConsultationCallPanel({
       top: Math.max(oT + 16, window.innerHeight > window.innerWidth ? 48 : 16),
       left: oL + 16,
       right: oL + vW - width - 16,
-      bottom: oT + vH - (width * 0.75 + 40) - 16, 
+      bottom: oT + vH - (width * (4 / 3)) - 16, 
     };
   }, []);
 
@@ -165,7 +169,7 @@ export function ConsultationCallPanel({
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", onVisibilityChange);
     };
-  }, []);
+  }, [calculateBounds]);
 
   // Orientation change = cancel peek mode and reset safe defaults
   useEffect(() => {
@@ -185,7 +189,7 @@ export function ConsultationCallPanel({
     };
     window.addEventListener("orientationchange", onOrientationChange);
     return () => window.removeEventListener("orientationchange", onOrientationChange);
-  }, []);
+  }, [calculateBounds]);
 
   // Keyboard detection (hybrid with debounce) & Atomic bounds recalculation
   useEffect(() => {
@@ -324,34 +328,61 @@ export function ConsultationCallPanel({
   }
 
   // No active call + floating mode → render nothing (no pre-join UI in PiP)
-  if (minimized && !tokenData) return null;
+  if (minimized && !tokenData) {
+    return (
+      <div className="fixed bottom-24 right-4 z-[999] sm:bottom-6 sm:right-6">
+        <button
+          type="button"
+          onClick={() => {
+            hapticTap();
+            void joinCall();
+          }}
+          disabled={joining}
+          className="flex h-14 items-center gap-2 rounded-full bg-brand px-5 text-sm font-bold text-white shadow-[0_8px_32px_rgba(88,155,255,0.3)] transition-transform hover:-translate-y-0.5 hover:shadow-[0_12px_40px_rgba(88,155,255,0.4)] active:scale-95 disabled:opacity-70 disabled:hover:translate-y-0"
+        >
+          {joining ? (
+            <span className="flex items-center gap-2">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              Joining...
+            </span>
+          ) : (
+            <>
+              <Phone className="h-5 w-5" />
+              Join Call
+            </>
+          )}
+        </button>
+      </div>
+    );
+  }
 
   // Active call — layout adapts via `minimized`
   if (tokenData) {
-    if (!minimized) {
-      return (
-        <div className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white transition-all duration-300">
-          <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
-              <p className="mt-0.5 text-[11px] text-gray-400">Video and chat in one place</p>
+    return (
+      <LiveKitRoom
+        key={appointmentId}
+        serverUrl={tokenData.server_url}
+        token={tokenData.token}
+        connect
+        audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
+        video={buildPreferredVideoConstraints(mediaPreferences.video)}
+        options={LIVEKIT_ROOM_OPTIONS}
+        onMediaDeviceFailure={handleMediaDeviceFailure}
+        onDisconnected={handleDisconnected}
+        style={{ display: "contents" }}
+      >
+        <ConnectionObserver />
+        {!minimized ? (
+          <div className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white transition-all duration-300">
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
+                <p className="mt-0.5 text-[11px] text-gray-400">Video and chat in one place</p>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
+                In call
+              </span>
             </div>
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
-              In call
-            </span>
-          </div>
-
-          <LiveKitRoom
-            key={appointmentId}
-            serverUrl={tokenData.server_url}
-            token={tokenData.token}
-            connect
-            audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
-            video={buildPreferredVideoConstraints(mediaPreferences.video)}
-            options={LIVEKIT_ROOM_OPTIONS}
-            onMediaDeviceFailure={handleMediaDeviceFailure}
-            onDisconnected={handleDisconnected}
-          >
             <CallRoomContent
               minimized={false}
               patientName={appointment.patient.full_name}
@@ -360,125 +391,104 @@ export function ConsultationCallPanel({
               onEnd={() => endCallMutation.mutate()}
               onMaximize={onMaximize}
             />
-          </LiveKitRoom>
-        </div>
-      );
-    }
-
-    // Minimized (PiP) Layout with Framer Motion Physics
-    return (
-      <motion.div
-        role="dialog"
-        aria-label="Video call window"
-        drag
-        dragControls={dragControls}
-        dragListener={false} // Drag is explicitly handled by the grip icon only
-        dragMomentum={false}
-        dragElastic={0.05}
-        dragConstraints={bounds}
-        onDragStart={() => {
-          if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-          setIsPeeking(false);
-          interactionState.current = "dragging";
-          setIsDragging(true);
-        }}
-        onDragEnd={(e, info) => {
-          interactionState.current = "idle";
-          setIsDragging(false);
-          lastUserYRef.current = info.point.y;
-          wasInBottomHalfRef.current = info.point.y > (typeof window !== 'undefined' ? window.innerHeight / 2 : 500);
-          // Framer Motion internally clamps to dragConstraints if left out of bounds, 
-          // preventing the "slow session drift" without needing manual setPosition state!
-        }}
-        onClick={() => {
-          if (isDragging) return;
-          if (interactionState.current === "idle" || interactionState.current === "peeking") {
-             handlePeek();
-          }
-        }}
-        initial={false}
-        animate={{
-          width: pipWidth,
-          opacity: isKeyboardOpen && !isPeeking ? 0.85 : 1,
-          // Smart snap: only force PiP to top-right if user left it in the bottom half
-          x: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
-               ? bounds.right 
-               : undefined,
-          y: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
-               ? bounds.top 
-               : undefined,
-          scale: isDragging ? 1.02 : 1,
-        }}
-        transition={{
-          type: "spring",
-          stiffness: 300,
-          damping: 30,
-        }}
-        className={cn(
-          "fixed z-[1000] overflow-hidden rounded-2xl border touch-manipulation",
-          isDragging
-            ? "cursor-grabbing border-brand/40 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)] bg-[#111113]/90 backdrop-blur-md"
-            : "border-white/10",
-          !isDragging && (isKeyboardOpen && !isPeeking 
-             ? "bg-[#111113]/95 backdrop-blur-none shadow-lg" // Performance optimization for low-end Androids
-             : "bg-[#111113]/90 backdrop-blur-md shadow-2xl")
-        )}
-        style={{
-          // Set initial fallback position on mount before framer-motion takes over
-          top: 0,
-          left: 0,
-          // Shift initial position out of view until constraints load, or snap to corner
-          x: bounds.right || (typeof window !== 'undefined' ? window.innerWidth - pipWidth - 16 : 0),
-          y: bounds.top || (typeof window !== 'undefined' && window.innerHeight > window.innerWidth ? 48 : 16),
-        }}
-      >
-        {/* ── Drag handle ───────────────────────── */}
-        <div
-          onPointerDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            dragControls.start(e);
-          }}
-          className={cn(
-            "absolute inset-x-0 top-0 z-10 flex h-10 touch-none select-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
-            isDragging || isKeyboardOpen ? "opacity-100" : "opacity-0 hover:opacity-100",
-            isDragging ? "cursor-grabbing" : "cursor-grab",
-          )}
-        >
-          <GripHorizontal className="h-4 w-4 shrink-0 text-white/60 drop-shadow-md" />
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              hapticTap();
-              if (onMaximize) onMaximize();
+          </div>
+        ) : (
+          <motion.div
+            role="dialog"
+            aria-label="Video call window"
+            drag
+            dragControls={dragControls}
+            dragListener={false}
+            dragMomentum={false}
+            dragElastic={0.05}
+            dragConstraints={bounds}
+            onDragStart={() => {
+              if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+              setIsPeeking(false);
+              interactionState.current = "dragging";
+              setIsDragging(true);
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30"
+            onDragEnd={(e, info) => {
+              interactionState.current = "idle";
+              setIsDragging(false);
+              lastUserYRef.current = info.point.y;
+              wasInBottomHalfRef.current = info.point.y > (typeof window !== 'undefined' ? window.innerHeight / 2 : 500);
+            }}
+            onClick={() => {
+              if (isDragging) return;
+              if (interactionState.current === "idle" || interactionState.current === "peeking") {
+                 handlePeek();
+              }
+            }}
+            initial={false}
+            animate={{
+              width: pipWidth,
+              opacity: isKeyboardOpen && !isPeeking ? 0.85 : 1,
+              x: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
+                   ? bounds.right 
+                   : undefined,
+              y: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
+                   ? bounds.top 
+                   : undefined,
+              scale: isDragging ? 1.02 : 1,
+            }}
+            transition={{
+              type: "spring",
+              stiffness: 300,
+              damping: 30,
+            }}
+            className={cn(
+              "fixed z-[1000] overflow-hidden rounded-2xl border touch-manipulation",
+              isDragging
+                ? "cursor-grabbing border-brand/40 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)] bg-[#111113]/90 backdrop-blur-md"
+                : "border-white/10",
+              !isDragging && (isKeyboardOpen && !isPeeking 
+                 ? "bg-[#111113]/95 backdrop-blur-none shadow-lg"
+                 : "bg-[#111113]/90 backdrop-blur-md shadow-2xl")
+            )}
+            style={{
+              top: 0,
+              left: 0,
+              x: bounds.right || (typeof window !== 'undefined' ? window.innerWidth - pipWidth - 16 : 0),
+              y: bounds.top || (typeof window !== 'undefined' && window.innerHeight > window.innerWidth ? 48 : 16),
+            }}
           >
-            <Maximize2 className="h-4 w-4" />
-          </button>
-        </div>
+            <div
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dragControls.start(e);
+              }}
+              className={cn(
+                "absolute inset-x-0 top-0 z-10 flex h-10 touch-none select-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
+                isDragging || isKeyboardOpen ? "opacity-100" : "opacity-0 hover:opacity-100",
+                isDragging ? "cursor-grabbing" : "cursor-grab",
+              )}
+            >
+              <GripHorizontal className="h-4 w-4 shrink-0 text-white/60 drop-shadow-md" />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  hapticTap();
+                  if (onMaximize) onMaximize();
+                }}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </button>
+            </div>
 
-        <LiveKitRoom
-          key={appointmentId}
-          serverUrl={tokenData.server_url}
-          token={tokenData.token}
-          connect
-          audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
-          video={buildPreferredVideoConstraints(mediaPreferences.video)}
-          options={LIVEKIT_ROOM_OPTIONS}
-          onMediaDeviceFailure={handleMediaDeviceFailure}
-          onDisconnected={handleDisconnected}
-        >
-          <CallRoomContent
-            minimized={true}
-            patientName={appointment.patient.full_name}
-            endLabel="End consultation"
-            endLoading={endCallMutation.isPending}
-            onEnd={() => endCallMutation.mutate()}
-            onMaximize={onMaximize}
-          />
-        </LiveKitRoom>
-      </motion.div>
+            <CallRoomContent
+              minimized={true}
+              patientName={appointment.patient.full_name}
+              endLabel="End consultation"
+              endLoading={endCallMutation.isPending}
+              onEnd={() => endCallMutation.mutate()}
+              onMaximize={onMaximize}
+            />
+          </motion.div>
+        )}
+      </LiveKitRoom>
     );
   }
 
@@ -932,9 +942,8 @@ function CallRoomContent({
           {/* Controls Overlay Bottom */}
           <div className="absolute inset-x-0 bottom-4 flex justify-center pointer-events-none">
             <div className="flex items-center justify-center gap-3 rounded-[2rem] bg-black/60 px-5 py-3 backdrop-blur-xl pointer-events-auto shadow-[0_16px_40px_rgba(0,0,0,0.5)] border border-white/10">
-              <button
-                type="button"
-                onClick={() => void toggleMic()}
+              <TrackToggle
+                source={Track.Source.Microphone}
                 className={cn(
                   "flex h-12 w-12 items-center justify-center rounded-full transition-transform hover:scale-105 active:scale-95",
                   isMicrophoneEnabled
@@ -943,10 +952,9 @@ function CallRoomContent({
                 )}
               >
                 {isMicrophoneEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => void toggleCamera()}
+              </TrackToggle>
+              <TrackToggle
+                source={Track.Source.Camera}
                 className={cn(
                   "flex h-12 w-12 items-center justify-center rounded-full transition-transform hover:scale-105 active:scale-95",
                   Boolean(localVideoTrack)
@@ -959,7 +967,7 @@ function CallRoomContent({
                 ) : (
                   <CameraOff className="h-5 w-5" />
                 )}
-              </button>
+              </TrackToggle>
 
               <button
                 type="button"

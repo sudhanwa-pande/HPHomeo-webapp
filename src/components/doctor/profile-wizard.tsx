@@ -1110,7 +1110,7 @@ export function ProfileWizard({
                           <div>
                             <p className="text-[13px] font-semibold text-blue-800">One more step: Set your availability</p>
                             <p className="mt-0.5 text-[12px] text-blue-600">
-                              After saving, you'll set your weekly schedule. Once admin-verified, you'll appear in listings.
+                              After saving, you&apos;ll set your weekly schedule. Once admin-verified, you&apos;ll appear in listings.
                             </p>
                           </div>
                         </motion.div>
