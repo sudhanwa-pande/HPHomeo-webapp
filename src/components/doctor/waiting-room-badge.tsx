@@ -7,7 +7,7 @@ import { Phone, PhoneCall, User, X, Clock } from "lucide-react";
 import { format } from "date-fns";
 
 import api from "@/lib/api";
-import type { CallsDashboardResponse, CallsDashboardItem } from "@/types/doctor";
+import type { CallsDashboardResponse } from "@/types/doctor";
 
 export function WaitingRoomBadge() {
   const router = useRouter();

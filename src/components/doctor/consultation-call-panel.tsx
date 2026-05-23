@@ -88,10 +88,24 @@ export function ConsultationCallPanel({
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [callEnded, setCallEnded] = useState(false);
+  const callEndedRef = useRef(false);
   const [mediaPreferences, setMediaPreferences] = useState<MediaPreferences>({
     audio: true,
     video: true,
   });
+
+  // Safety net: stop all camera/mic tracks when this panel unmounts
+  useEffect(() => {
+    return () => {
+      document.querySelectorAll("video, audio").forEach((el) => {
+        const media = el as HTMLMediaElement;
+        if (media.srcObject instanceof MediaStream) {
+          media.srcObject.getTracks().forEach((t) => t.stop());
+          media.srcObject = null;
+        }
+      });
+    };
+  }, []);
 
   /* ── Adaptive PiP State ── */
   const dragControls = useDragControls();
@@ -252,7 +266,10 @@ export function ConsultationCallPanel({
       ? "Continue consultation"
       : "Start consultation";
 
+  const joinInFlightRef = useRef(false);
   const joinCall = async (options?: Partial<MediaPreferences>) => {
+    if (joinInFlightRef.current) return;
+    joinInFlightRef.current = true;
     const wantsAudio = options?.audio ?? mediaPreferences.audio;
     const wantsVideo = options?.video ?? mediaPreferences.video;
     setJoining(true);
@@ -266,6 +283,7 @@ export function ConsultationCallPanel({
       );
       hapticSuccess();
       setCallEnded(false);
+      callEndedRef.current = false;
       setTokenData(data);
     } catch (error) {
       const message = getMediaDeviceErrorMessage(error);
@@ -279,6 +297,7 @@ export function ConsultationCallPanel({
         notifyApiError(error, "Couldn't start call");
       }
     } finally {
+      joinInFlightRef.current = false;
       setJoining(false);
     }
   };
@@ -290,6 +309,7 @@ export function ConsultationCallPanel({
     onSuccess: async () => {
       hapticPulse();
       notifySuccess("Call ended", "The consultation session has been closed.");
+      callEndedRef.current = true;
       setCallEnded(true);
       setTokenData(null);
       await Promise.all([
@@ -311,6 +331,8 @@ export function ConsultationCallPanel({
   };
 
   const handleDisconnected = () => {
+    // Don't show "connection dropped" if the call was intentionally ended
+    if (callEndedRef.current) return;
     setJoinError("Connection dropped. Rejoin the consultation to continue.");
     setTokenData(null);
   };
@@ -328,7 +350,9 @@ export function ConsultationCallPanel({
   }
 
   // No active call + floating mode → render nothing (no pre-join UI in PiP)
+  // Also hide the Join FAB if the call has already ended
   if (minimized && !tokenData) {
+    if (callEnded) return null;
     return (
       <div className="fixed bottom-24 right-4 z-[999] sm:bottom-6 sm:right-6">
         <button
@@ -706,15 +730,6 @@ function CallRoomContent({
       );
     } catch (error) {
       notifyError("Microphone update failed", getMediaDeviceErrorMessage(error));
-    }
-  };
-
-  const toggleCamera = async () => {
-    hapticTap();
-    try {
-      await localParticipant.setCameraEnabled(!isCameraEnabled);
-    } catch (error) {
-      notifyError("Camera update failed", getMediaDeviceErrorMessage(error));
     }
   };
 

@@ -27,6 +27,8 @@ interface UseEventStreamOptions {
   onAnyEvent?: EventHandler;
   /** Called when the connection is re-established after a drop (not on initial connect) */
   onReconnect?: () => void;
+  /** When true, don't disconnect on tab visibility changes (use during active calls) */
+  keepAlive?: boolean;
 }
 
 interface UseEventStreamReturn {
@@ -63,6 +65,7 @@ export function useEventStream({
   enabled = true,
   onAnyEvent,
   onReconnect,
+  keepAlive = false,
 }: UseEventStreamOptions): UseEventStreamReturn {
   const [connectionState, setConnectionState] =
     useState<SSEConnectionState>("disconnected");
@@ -95,6 +98,8 @@ export function useEventStream({
   // Set to false on cleanup — guards against zombie connections from async
   // operations (auth refresh) that resolve after the hook has unmounted.
   const mountedRef = useRef(true);
+  const keepAliveRef = useRef(keepAlive);
+  keepAliveRef.current = keepAlive;
 
   const disconnect = useCallback(() => {
     if (retryTimerRef.current) {
@@ -268,6 +273,10 @@ export function useEventStream({
     // Pause SSE when the tab is hidden to prevent phantom connections
     // that hold Redis pubsub slots while the user isn't looking.
     function handleVisibilityChange() {
+      // When keepAlive is true (during active calls), don't disconnect
+      // on tab switch — prevents missed SSE events on mobile
+      if (keepAliveRef.current) return;
+
       if (document.hidden) {
         disconnect();
       } else {

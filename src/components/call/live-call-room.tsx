@@ -8,10 +8,10 @@ import {
   useLocalParticipant,
   useMediaDevices,
   useRemoteParticipants,
-  RoomAudioRenderer,
   useRoomContext,
   useTracks,
-  VideoTrack,
+  ParticipantTile,
+  RoomAudioRenderer,
 } from "@livekit/components-react";
 import type { TrackReference } from "@livekit/components-core";
 import { isTrackReference } from "@livekit/components-core";
@@ -39,14 +39,13 @@ import { motion } from "framer-motion";
 import { notifyError, notifyInfo } from "@/lib/notify";
 import { playIncomingMessageSound } from "@/lib/sound";
 import {
-  getFacingModeLabel,
   getMediaDeviceErrorMessage,
   getPreferredCameraDevice,
   LIVEKIT_AUDIO_CAPTURE_OPTIONS,
   type CameraFacingMode,
 } from "@/lib/media";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 import { Input } from "@/components/ui/input";
 
 type LiveCallRoomProps = {
@@ -110,6 +109,9 @@ export function LiveCallRoom({
   callStartedAt,
 }: LiveCallRoomProps) {
   const room = useRoomContext();
+
+  // Prevent device screen from sleeping during calls (mobile)
+  useWakeLock();
   const connectionState = useConnectionState();
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send, isSending } = useChat();
@@ -186,7 +188,7 @@ export function LiveCallRoom({
     }
   }, [connectionState, onConnected]);
 
-  // ── 2. Connection timeout — disconnect after 20 s if stuck Connecting ──
+  // ── 2. Connection timeout — disconnect after 45 s if stuck Connecting ──
   useEffect(() => {
     if (connectionState === ConnectionState.Connecting) {
       if (!connectTimeoutRef.current) {
@@ -229,28 +231,26 @@ export function LiveCallRoom({
     }
   }, [connectionState]);
 
-  // ── 5. iOS Safari visibilitychange — restart suspended tracks on foreground ──
+  // ── Safety net: disconnect room and stop all media tracks on unmount ──
+  // Prevents ghost participants when navigating away with disconnectOnPageLeave: false
   useEffect(() => {
-    if (typeof document === "undefined") return;
-
-    function handleVisibilityChange() {
-      if (document.visibilityState !== "visible") return;
-      // iOS Safari suspends MediaStreamTrack when the app is backgrounded.
-      // Restart any track whose readyState has become 'ended'.
-      room.localParticipant.getTrackPublications().forEach((pub) => {
-        const track = pub.track;
-        if (!track) return;
-        const msTrack = track.mediaStreamTrack;
-        if (msTrack && msTrack.readyState === "ended" && track instanceof LocalTrack) {
-          track.restartTrack().catch(() => {});
+    return () => {
+      try {
+        room.disconnect(true);
+      } catch {
+        // room may already be disconnected
+      }
+      // Belt-and-suspenders: stop any lingering hardware tracks
+      document.querySelectorAll("video, audio").forEach((el) => {
+        const media = el as HTMLMediaElement;
+        if (media.srcObject instanceof MediaStream) {
+          media.srcObject.getTracks().forEach((t) => t.stop());
+          media.srcObject = null;
         }
       });
-    }
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () =>
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [room]);
+
 
   // ── 6. Track whether remote ever connected ──
   useEffect(() => {
@@ -297,12 +297,17 @@ export function LiveCallRoom({
       (t) => !t.participant.isLocal && t.source === Track.Source.ScreenShare,
     ),
   );
+  const localScreenShareTrack = getPublishedTrack(
+    tracks.find(
+      (t) => t.participant.isLocal && t.source === Track.Source.ScreenShare,
+    ),
+  );
 
   const connectionLabel = useMemo(
     () => formatConnectionState(connectionState, remoteParticipants.length),
     [connectionState, remoteParticipants.length],
   );
-  const isCameraLive = Boolean(localVideoTrack);
+  const isCameraLive = isCameraEnabled;
   const canSwitchCamera = allowCameraSwitch && videoDevices.length > 1;
   const isConnected = connectionState === ConnectionState.Connected;
   const isReconnecting = connectionState === ConnectionState.Reconnecting;
@@ -600,15 +605,26 @@ export function LiveCallRoom({
         <div className="relative h-full w-full overflow-hidden" ref={containerRef}>
           {/* Remote video / waiting state */}
           <div className="absolute inset-0">
-            {remoteScreenTrack ? (
-              <VideoTrack
+            {remoteScreenTrack && remoteParticipants.length > 0 ? (
+              <ParticipantTile
                 trackRef={remoteScreenTrack}
-                className="h-full w-full object-contain bg-black"
+                className="h-full w-full bg-black [&>video]:object-contain"
+                disableSpeakingIndicator
               />
-            ) : remoteVideoTrack ? (
-              <VideoTrack
-                trackRef={remoteVideoTrack}
-                className="h-full w-full object-cover bg-[#111113]"
+            ) : localScreenShareTrack ? (
+              <ParticipantTile
+                trackRef={localScreenShareTrack}
+                className="h-full w-full bg-black [&>video]:object-contain"
+                disableSpeakingIndicator
+              />
+            ) : remoteParticipants.length > 0 ? (
+              <ParticipantTile
+                trackRef={remoteVideoTrack || {
+                  participant: remoteParticipants[0],
+                  source: Track.Source.Camera,
+                }}
+                className="h-full w-full bg-[#111113] [&>video]:object-cover"
+                disableSpeakingIndicator
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(ellipse_at_center,#1a1a1f_0%,#111113_70%)]">
@@ -671,8 +687,8 @@ export function LiveCallRoom({
             </div>
           )}
 
-          {/* Remote participant label (top-left, only when video is showing) */}
-          {(remoteVideoTrack || remoteScreenTrack) && !hasWeakRemoteSignal ? (
+          {/* Remote participant label (top-left, only when waiting) */}
+          {hasRemote && !remoteVideoTrack && !remoteScreenTrack && !localScreenShareTrack && !hasWeakRemoteSignal ? (
             <div
               className={cn(
                 "pointer-events-none absolute left-3 top-3 z-10 transition-all duration-300 sm:left-4 sm:top-4",
@@ -688,6 +704,40 @@ export function LiveCallRoom({
                 {remoteLabel}
               </div>
             </div>
+          ) : null}
+
+          {/* ── Remote PiP preview (when screen sharing) ───────────── */}
+          {(remoteScreenTrack || localScreenShareTrack) && remoteParticipants.length > 0 ? (
+            <motion.div
+              drag
+              dragConstraints={containerRef}
+              dragElastic={0.05}
+              dragMomentum={false}
+              className={cn(
+                "absolute z-10 cursor-grab active:cursor-grabbing touch-none",
+                isMobileViewport
+                  ? "w-[28vw] min-w-[88px] max-w-[130px]"
+                  : "w-[160px]",
+              )}
+              style={{
+                bottom: isMobileViewport
+                  ? "calc(7.5rem + 30vw + env(safe-area-inset-bottom, 0px))"
+                  : "18.5rem",
+                right: isMobileViewport ? "12px" : "20px",
+              }}
+            >
+              <div className="pointer-events-none overflow-hidden rounded-xl border border-white/[0.08] bg-[#1a1a1f] shadow-[0_8px_32px_rgba(0,0,0,0.5)] sm:rounded-2xl">
+                <div className={cn("relative", isMobileViewport ? "aspect-[3/4]" : "aspect-[4/3]")}>
+                  <ParticipantTile
+                    trackRef={remoteVideoTrack || {
+                      participant: remoteParticipants[0],
+                      source: Track.Source.Camera,
+                    }}
+                    className="h-full w-full [&>video]:object-cover"
+                  />
+                </div>
+              </div>
+            </motion.div>
           ) : null}
 
           {/* ── Reconnecting overlay ────────────────────────── */}
@@ -731,34 +781,13 @@ export function LiveCallRoom({
                   isMobileViewport ? "aspect-[3/4]" : "aspect-[4/3]",
                 )}
               >
-                {localVideoTrack ? (
-                  <VideoTrack
-                    trackRef={localVideoTrack}
-                    className="h-full w-full object-cover"
-                    style={{ transform: "scaleX(-1)" }}
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center">
-                    <CameraOff className="h-4 w-4 text-white/25" />
-                  </div>
-                )}
-                {/* Mic indicator */}
-                <div className="absolute bottom-1.5 left-1.5">
-                  <div
-                    className={cn(
-                      "flex h-5 w-5 items-center justify-center rounded-full sm:h-6 sm:w-6",
-                      isMicrophoneEnabled
-                        ? "bg-black/40 backdrop-blur-sm"
-                        : "bg-red-500/90",
-                    )}
-                  >
-                    {isMicrophoneEnabled ? (
-                      <Mic className="h-2.5 w-2.5 text-white/80 sm:h-3 sm:w-3" />
-                    ) : (
-                      <MicOff className="h-2.5 w-2.5 text-white sm:h-3 sm:w-3" />
-                    )}
-                  </div>
-                </div>
+                <ParticipantTile
+                  trackRef={localVideoTrack || {
+                    participant: localParticipant,
+                    source: Track.Source.Camera,
+                  }}
+                  className="h-full w-full [&>video]:object-cover [&>video]:scale-x-[-1]"
+                />
               </div>
             </div>
           </motion.div>

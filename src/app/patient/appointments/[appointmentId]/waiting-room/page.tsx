@@ -7,30 +7,26 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LiveKitRoom } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { motion, AnimatePresence } from "framer-motion";
+import Image from "next/image";
 import {
   ArrowLeft,
-  Camera,
-  CameraOff,
   Check,
+  CheckCircle2,
   Clock,
   Lightbulb,
   Loader2,
-  Mic,
-  MicOff,
   MonitorPlay,
-  RefreshCw,
   ShieldCheck,
-  Video,
   Wifi,
   WifiOff,
 } from "lucide-react";
+import { AuthGuard } from "@/components/auth-guard";
 
 import api from "@/lib/api";
 import { formatTime, formatDate } from "@/lib/appointment-utils";
 import {
   buildPreferredAudioConstraints,
   buildPreferredVideoConstraints,
-  getFacingModeLabel,
   getMediaDeviceErrorMessage,
   LIVEKIT_ROOM_OPTIONS,
   prepareMediaChoices,
@@ -39,14 +35,12 @@ import {
 import { notifyApiError, notifyError, notifyInfo } from "@/lib/notify";
 import { useCountdown } from "@/hooks/use-countdown";
 import { useEventStream } from "@/hooks/use-event-stream";
-import { AuthGuard } from "@/components/auth-guard";
 import { PatientShell } from "@/components/patient/patient-shell";
 import { LiveCallRoom } from "@/components/call/live-call-room";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/loading";
 import { DoctorInfoCard } from "@/components/appointment/doctor-info-card";
 import { cn } from "@/lib/utils";
-import type { PatientAppointmentsResponse } from "@/types/patient";
 import type { VideoTokenResponse } from "@/types/doctor";
 
 const TIPS = [
@@ -80,6 +74,7 @@ function WaitingRoomContent() {
   const joinInFlightRef = useRef(false);
   const refreshInFlightRef = useRef(false);
   const isMountedRef = useRef(true);
+  const callEndedRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -129,20 +124,19 @@ function WaitingRoomContent() {
   const { data: apt, isLoading } = useQuery({
     queryKey: ["patient", "appointment", appointmentId, "waiting"],
     queryFn: async () => {
-      const { data } = await api.get<PatientAppointmentsResponse>(
-        "/patient/appointments",
-        { params: { limit: 100 } },
+      const { data } = await api.get(
+        `/patient/appointments/${appointmentId}`,
       );
-      return (
-        data.items.find((a) => a.appointment_id === appointmentId) || null
-      );
+      return data;
     },
     refetchInterval: 30_000,
   });
 
   // SSE for appointment status updates
+  // keepAlive prevents disconnect on mobile tab switch when connected to the call.
   const { connectionState: sseState, hasConnected: sseHasConnected } = useEventStream({
     path: "/patient/events/stream",
+    keepAlive: Boolean(tokenData),
     onEvent: {
       call_state_changed: () => {
         queryClient.invalidateQueries({
@@ -238,7 +232,11 @@ function WaitingRoomContent() {
   );
 
   const tokenRefresher = useCallback(async () => {
-    if (refreshInFlightRef.current) return "";
+    if (refreshInFlightRef.current) {
+      // Don't return empty string — the SDK would try to use it as a JWT.
+      // Throw so the SDK retries with the existing valid token.
+      throw new Error("Token refresh already in progress");
+    }
     refreshInFlightRef.current = true;
     try {
       const { data } = await api.post<VideoTokenResponse>(
@@ -253,13 +251,19 @@ function WaitingRoomContent() {
     }
   }, [appointmentId]);
 
-  // Auto-connect to LiveKit immediately
+  // Auto-connect to LiveKit only when doctor is ready
   const autoConnectRef = useRef(false);
   useEffect(() => {
     if (autoConnectRef.current || tokenData || joining) return;
-    autoConnectRef.current = true;
-    void connectToRoom();
-  }, [connectToRoom, tokenData, joining]);
+    
+    // Only auto-connect if the doctor has initiated the call (or is already connected)
+    // and the call hasn't already ended
+    if (apt?.call_status === "ended") return;
+    if (apt?.call_status === "waiting" || apt?.call_status === "connected") {
+      autoConnectRef.current = true;
+      void connectToRoom();
+    }
+  }, [connectToRoom, tokenData, joining, apt?.call_status]);
 
   const handleMediaDeviceFailure = useCallback(
     (_failure?: unknown, kind?: string) => {
@@ -273,12 +277,73 @@ function WaitingRoomContent() {
     [],
   );
 
-  const handleDisconnect = useCallback(() => {
-    setJoinError("Connection dropped. Trying to reconnect...");
-    setTokenData(null);
-    // Allow reconnection
-    autoConnectRef.current = false;
+  const handleDisconnect = useCallback((reason?: unknown) => {
+    // Don't show "connection dropped" if the call was intentionally ended
+    if (callEndedRef.current) return;
+    const reasonStr = String(reason);
+    if (["server_shutdown", "room_deleted", "user_rejected", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
+      setJoinError("Connection dropped. Trying to reconnect...");
+      setTokenData(null);
+      autoConnectRef.current = false;
+    } else {
+      setTokenData(null);
+      autoConnectRef.current = false;
+    }
   }, []);
+
+  // ─── Loading state ───────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <PatientShell title="Waiting Room" subtitle="Loading...">
+        <div className="mx-auto max-w-2xl space-y-4">
+          <Skeleton className="h-40 rounded-2xl" />
+          <Skeleton className="h-64 rounded-2xl" />
+        </div>
+      </PatientShell>
+    );
+  }
+
+  if (!apt) {
+    return (
+      <PatientShell title="Waiting Room" subtitle="Not found">
+        <div className="mx-auto max-w-2xl py-16 text-center">
+          <p className="text-sm text-gray-500">Appointment not found</p>
+          <Button
+            size="sm"
+            className="mt-4"
+            onClick={() => router.push("/patient/appointments")}
+          >
+            Back to Appointments
+          </Button>
+        </div>
+      </PatientShell>
+    );
+  }
+
+  // ─── Ended / Cannot Join logic ───────────────────────────────────
+  if (apt.call_status === "ended") {
+    // Mark as ended so disconnect handler + auto-connect don't fire
+    callEndedRef.current = true;
+    return <ConsultationEnded appointmentId={appointmentId} duration={apt.duration_min} />;
+  }
+
+  const canJoin = Boolean(
+    apt.mode === "online" && apt.video_enabled && apt.status === "confirmed"
+  );
+
+  if (!canJoin) {
+    return (
+      <CallState
+        title="This appointment is not ready for video"
+        description="Only confirmed online appointments with video enabled can join."
+        action={
+          <Button className="mt-6 rounded-xl" onClick={() => router.push(`/patient/appointments/${appointmentId}`)}>
+            <ArrowLeft className="h-4 w-4" /> Back to appointment
+          </Button>
+        }
+      />
+    );
+  }
 
   // ─── If connected to LiveKit, show full-screen call UI ───────────
   if (tokenData && apt) {
@@ -302,6 +367,9 @@ function WaitingRoomContent() {
           remoteWaitingTitle={`Waiting for Dr. ${apt.doctor_name.split(" ").pop()}`}
           remoteWaitingDescription="You're in the consultation room. The doctor will appear here as soon as they join."
           onLeave={() =>
+            router.push(`/patient/appointments/${appointmentId}`)
+          }
+          onBack={() =>
             router.push(`/patient/appointments/${appointmentId}`)
           }
           onConnected={() => setCallStartedAt(Date.now())}
@@ -334,35 +402,6 @@ function WaitingRoomContent() {
           callStartedAt={callStartedAt}
         />
       </LiveKitRoom>
-    );
-  }
-
-  // ─── Loading state ───────────────────────────────────────────────
-  if (isLoading) {
-    return (
-      <PatientShell title="Waiting Room" subtitle="Loading...">
-        <div className="mx-auto max-w-2xl space-y-4">
-          <Skeleton className="h-40 rounded-2xl" />
-          <Skeleton className="h-64 rounded-2xl" />
-        </div>
-      </PatientShell>
-    );
-  }
-
-  if (!apt) {
-    return (
-      <PatientShell title="Waiting Room" subtitle="Not found">
-        <div className="mx-auto max-w-2xl py-16 text-center">
-          <p className="text-sm text-gray-500">Appointment not found</p>
-          <Button
-            size="sm"
-            className="mt-4"
-            onClick={() => router.push("/patient/appointments")}
-          >
-            Back to Appointments
-          </Button>
-        </div>
-      </PatientShell>
     );
   }
 
@@ -624,4 +663,44 @@ function WaitingRoomPage() {
   );
 }
 
-export default dynamic(() => Promise.resolve(WaitingRoomPage), { ssr: false });
+export default dynamic(() => Promise.resolve(WaitingRoomPage), {
+  ssr: false,
+});
+
+function ConsultationEnded({ appointmentId, duration }: { appointmentId: string; duration?: number }) {
+  const router = useRouter();
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-brand-bg px-6">
+      <div className="w-full max-w-lg rounded-3xl border border-gray-200/80 bg-white px-8 py-10 text-center shadow-sm">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
+          <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+        </div>
+        <p className="mt-6 text-xl font-bold text-gray-900">Consultation Ended</p>
+        <p className="mt-2 text-sm leading-relaxed text-gray-500">
+          The video call has finished. Thank you for using eHomeo.
+        </p>
+        <div className="mt-8 flex flex-col gap-3">
+          <Button className="rounded-xl" onClick={() => router.push(`/patient/appointments/${appointmentId}`)}>
+            Return to Appointment
+          </Button>
+          <Button variant="outline" className="rounded-xl" onClick={() => router.push("/patient/dashboard")}>
+            Go to Dashboard
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CallState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-brand-bg px-6">
+      <div className="w-full max-w-lg rounded-3xl border border-gray-200/80 bg-white px-8 py-10 text-center shadow-sm">
+        <Image src="/images/logo.svg" alt="eHomeo" width={130} height={42} className="mx-auto h-7 w-auto" />
+        <p className="mt-6 text-lg font-semibold text-gray-900">{title}</p>
+        <p className="mt-2 text-sm leading-relaxed text-gray-500">{description}</p>
+        {action}
+      </div>
+    </div>
+  );
+}

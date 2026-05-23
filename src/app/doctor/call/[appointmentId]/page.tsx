@@ -1,11 +1,11 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LiveKitRoom } from "@livekit/components-react";
+import { LiveKitRoom, PreJoin, LocalUserChoices } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { ArrowLeft, Camera, CameraOff, CheckCircle2, CircleAlert, Loader2, Mic, MicOff, Phone, PhoneOff, User, Video } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleAlert, Loader2, PhoneOff, User } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
 import api from "@/lib/api";
@@ -14,9 +14,8 @@ import {
   buildPreferredAudioConstraints,
   getMediaDeviceErrorMessage,
   LIVEKIT_ROOM_OPTIONS,
-  prepareMediaChoices,
 } from "@/lib/media";
-import { notifyApiError, notifyError, notifyInfo, notifySuccess } from "@/lib/notify";
+import { notifyApiError, notifyError, notifySuccess } from "@/lib/notify";
 import { useEventStream } from "@/hooks/use-event-stream";
 import { AuthGuard } from "@/components/auth-guard";
 import { LiveCallRoom } from "@/components/call/live-call-room";
@@ -35,13 +34,7 @@ type MediaPreferences = {
   video: boolean;
 };
 
-// Imperative handle exposed by the pre-join card so the parent can release
-// the preview MediaStream's tracks BEFORE <LiveKitRoom> mounts. Avoids the
-// "device in use" race where LiveKit tries to acquire camera/mic before
-// React has run the card's unmount cleanup.
-type PreJoinHandle = {
-  releasePreview: () => void;
-};
+
 
 export default function CallRoomPage() {
   return (
@@ -60,15 +53,14 @@ function CallRoomContent() {
   const joinInFlightRef = useRef(false);
   const refreshInFlightRef = useRef(false);
   const isMountedRef = useRef(true);
+  const callEndedRef = useRef(false);
 
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
     };
   }, []);
-  // Lets us imperatively release the pre-join preview's MediaStream tracks
-  // immediately before mounting <LiveKitRoom> — see PreJoinHandle docstring.
-  const preJoinRef = useRef<PreJoinHandle>(null);
+
   const resumeStorageKey = `ehomeo:doctor-call:${appointmentId}`;
   const resumeAttemptStorageKey = `${resumeStorageKey}:resume-lock`;
 
@@ -98,8 +90,10 @@ function CallRoomContent() {
 
   // SSE for real-time call status updates. This page is standalone (not inside
   // DoctorShell), so it needs its own SSE connection.
+  // keepAlive prevents disconnect on mobile tab switch during active calls.
   useEventStream({
     path: "/doctor/events/stream",
+    keepAlive: Boolean(tokenData),
     onEvent: {
       call_state_changed: () => {
         queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail", appointmentId] });
@@ -160,7 +154,7 @@ function CallRoomContent() {
   );
   const handleDisconnected = useCallback((reason?: unknown) => {
     // Ignore disconnects that are part of the normal end-call flow
-    if (callEnded) return;
+    if (callEndedRef.current) return;
 
     console.log("Disconnected:", reason);
     const reasonStr = String(reason);
@@ -170,13 +164,17 @@ function CallRoomContent() {
       return;
     }
 
-    if (["server_shutdown", "room_deleted", "user_rejected", "leave", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
+    if (["server_shutdown", "room_deleted", "user_rejected", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
         setJoinError("Connection dropped. Rejoin the consultation to continue.");
         setTokenData(null);
         setCallStartedAt(null);
         clearResumeAttemptLock();
+    } else {
+        setTokenData(null);
+        setCallStartedAt(null);
+        clearResumeAttemptLock();
     }
-  }, [callEnded, clearResumeAttemptLock]);
+  }, [clearResumeAttemptLock]);
 
   const { data: appointment, isLoading: appointmentLoading } = useQuery({
     queryKey: ["doctor-appointment-detail", appointmentId],
@@ -196,46 +194,28 @@ function CallRoomContent() {
   }, [appointmentId, tokenData, queryClient]);
 
   const joinCall = useCallback(
-    async (options?: Partial<MediaPreferences>) => {
+    async (values: LocalUserChoices) => {
       if (joinInFlightRef.current) {
         return;
       }
-
-      const wantsAudio = options?.audio ?? mediaPreferences.audio;
-      const wantsVideo = options?.video ?? mediaPreferences.video;
 
       joinInFlightRef.current = true;
       setJoining(true);
       setJoinError(null);
 
       try {
-        const prepared = await prepareMediaChoices({
-          audio: wantsAudio,
-          video: wantsVideo,
-        });
-
-        setMediaPreferences({
-          audio: prepared.audio,
-          video: prepared.video,
-        });
-        persistResumeState({
-          audio: prepared.audio,
-          video: prepared.video,
-        });
-
-        if (prepared.warning) {
-          notifyInfo("Joining with available devices", prepared.warning);
-        }
-
         const { data } = await api.post<VideoTokenResponse>(`/doctor/appointments/${appointmentId}/video-token`);
-        // Release the preview's camera/mic before <LiveKitRoom> mounts and
-        // tries to re-acquire them. 200 ms covers Chrome/Safari device-release
-        // latency so LiveKit's getUserMedia doesn't see a still-locked device.
-        preJoinRef.current?.releasePreview();
-        await new Promise((resolve) => setTimeout(resolve, 200));
         
         if (isMountedRef.current) {
           setTokenData(data);
+          setMediaPreferences({
+            audio: values.audioEnabled,
+            video: values.videoEnabled,
+          });
+          persistResumeState({
+            audio: values.audioEnabled,
+            video: values.videoEnabled,
+          });
         }
         // callStartedAt is set via onConnected when the room actually connects,
         // not here — avoids counting ICE/DTLS negotiation time in the call timer.
@@ -250,7 +230,6 @@ function CallRoomContent() {
         }
       } finally {
         joinInFlightRef.current = false;
-        clearResumeAttemptLock();
         if (isMountedRef.current) {
           setJoining(false);
         }
@@ -258,15 +237,16 @@ function CallRoomContent() {
     },
     [
       appointmentId,
-      clearResumeAttemptLock,
-      mediaPreferences.audio,
-      mediaPreferences.video,
       persistResumeState,
     ],
   );
 
   const tokenRefresher = useCallback(async () => {
-    if (refreshInFlightRef.current) return "";
+    if (refreshInFlightRef.current) {
+      // Don't return empty string — the SDK would try to use it as a JWT.
+      // Throw so the SDK retries with the existing valid token.
+      throw new Error("Token refresh already in progress");
+    }
     refreshInFlightRef.current = true;
     try {
       const { data } = await api.post<VideoTokenResponse>(`/doctor/appointments/${appointmentId}/video-token`);
@@ -280,13 +260,15 @@ function CallRoomContent() {
 
   // Disconnect room if appointment status becomes "ended" (via SSE/polling)
   useEffect(() => {
+    if (callEnded) return;
     if (appointment?.call_status === "ended" && tokenData) {
+      callEndedRef.current = true;
       setCallEnded(true);
       setTokenData(null);
       setCallStartedAt(null);
       clearResumeState();
     }
-  }, [appointment?.call_status, tokenData, clearResumeState]);
+  }, [appointment?.call_status, tokenData, clearResumeState, callEnded]);
 
   const endCallMutation = useMutation({
     mutationFn: async () => {
@@ -295,6 +277,7 @@ function CallRoomContent() {
     onSuccess: () => {
       notifySuccess("Call ended", "The consultation session has been closed.");
       clearResumeState();
+      callEndedRef.current = true;
       setCallEnded(true);
       setTokenData(null);
       setCallStartedAt(null);
@@ -346,11 +329,17 @@ function CallRoomContent() {
 
     try {
       const parsed = JSON.parse(saved) as Partial<MediaPreferences>;
-      const nextPreferences = {
-        audio: parsed.audio ?? true,
-        video: parsed.video ?? true,
+      const nextPreferences: LocalUserChoices = {
+        videoEnabled: parsed.video ?? true,
+        audioEnabled: parsed.audio ?? true,
+        videoDeviceId: "",
+        audioDeviceId: "",
+        username: "",
       };
-      setMediaPreferences(nextPreferences);
+      setMediaPreferences({
+        audio: nextPreferences.audioEnabled,
+        video: nextPreferences.videoEnabled,
+      });
       void joinCall(nextPreferences);
     } catch {
       clearResumeState();
@@ -458,25 +447,71 @@ function CallRoomContent() {
 
   if (!tokenData) {
     return (
-      <PreJoinCard
-        ref={preJoinRef}
-        title={appointment?.patient?.full_name ?? "Video consultation"}
-        subtitle={
-          appointment ? format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy - hh:mm a") : ""
-        }
-        callStatus={appointment?.call_status}
-        joinError={joinError}
-        joining={joining}
-        mediaPreferences={mediaPreferences}
-        onToggleAudio={() => setMediaPreferences((current) => ({ ...current, audio: !current.audio }))}
-        onToggleVideo={() => setMediaPreferences((current) => ({ ...current, video: !current.video }))}
-        onJoin={() => void joinCall()}
-        onJoinWithoutMedia={() => void joinCall({ audio: false, video: false })}
-        onBack={() => {
-          clearResumeState();
-          router.push(`/doctor/appointments/${appointmentId}`);
-        }}
-      />
+      <div className="relative h-screen w-full bg-[#111113]" data-lk-theme="default">
+        {/* Banner context */}
+        <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-center p-4 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+          <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-6 py-3 rounded-full border border-white/10 shadow-xl pointer-events-auto">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/20">
+              <User className="h-5 w-5 text-brand" />
+            </div>
+            <div className="flex flex-col">
+              <p className="text-sm font-medium text-white">
+                {appointment?.patient?.full_name ?? "Patient"}
+              </p>
+              <p className="text-xs text-white/70">
+                {appointment ? format(parseISO(appointment.scheduled_at), "h:mm a") : ""}
+              </p>
+            </div>
+            {appointment?.call_status === "waiting" && (
+              <div className="ml-3 flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-500 border border-amber-500/20">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500"></span>
+                </span>
+                Patient is waiting
+              </div>
+            )}
+          </div>
+        </div>
+
+        <button 
+          onClick={() => {
+            clearResumeState();
+            router.push(`/doctor/appointments/${appointmentId}`);
+          }}
+          className="absolute top-6 left-6 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 transition-colors hover:bg-black/60 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 focus:ring-offset-[#111113]"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+
+        <div className="absolute inset-0 pt-20 pb-4 px-4 flex flex-col items-center justify-center">
+          <div className="w-full max-w-3xl overflow-hidden rounded-3xl border border-white/10 bg-[#161618] shadow-2xl relative">
+            <PreJoin
+              onError={(err) => console.log('Media error (ignored in UI)', err)}
+              defaults={{
+                audioEnabled: mediaPreferences.audio,
+                videoEnabled: mediaPreferences.video,
+              }}
+              onSubmit={joinCall}
+              className="h-full"
+            />
+            {joining && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-4 text-white">
+                  <Loader2 className="h-8 w-8 animate-spin text-brand" />
+                  <p className="text-sm font-medium">Connecting to room...</p>
+                </div>
+              </div>
+            )}
+          </div>
+          {joinError && (
+            <div className="mt-6 flex max-w-xl items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-400">
+              <CircleAlert className="h-5 w-5 shrink-0" />
+              <p className="text-sm">{joinError}</p>
+            </div>
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -514,280 +549,6 @@ function CallRoomContent() {
   );
 }
 
-type PreJoinCardProps = {
-  title: string;
-  subtitle: string;
-  callStatus?: string;
-  joinError: string | null;
-  joining: boolean;
-  mediaPreferences: MediaPreferences;
-  onToggleAudio: () => void;
-  onToggleVideo: () => void;
-  onJoin: () => void;
-  onJoinWithoutMedia: () => void;
-  onBack: () => void;
-};
-
-const PreJoinCard = forwardRef<PreJoinHandle, PreJoinCardProps>(function PreJoinCard({
-  title,
-  subtitle,
-  callStatus,
-  joinError,
-  joining,
-  mediaPreferences,
-  onToggleAudio,
-  onToggleVideo,
-  onJoin,
-  onJoinWithoutMedia,
-  onBack,
-}, ref) {
-  const patientIsWaiting = callStatus === "waiting";
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  // Imperative `releasePreview` so the parent can stop the camera/mic before
-  // <LiveKitRoom> mounts and tries to acquire the same devices.
-  useImperativeHandle(ref, () => ({
-    releasePreview: () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
-    },
-  }), []);
-
-  // Live camera preview
-  useEffect(() => {
-    let cancelled = false;
-
-    async function startPreview() {
-      if (!mediaPreferences.video) {
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((t) => t.stop());
-          streamRef.current = null;
-        }
-        return;
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: false,
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      } catch {
-        // Camera preview is best-effort — if it fails the user can still join
-      }
-    }
-
-    void startPreview();
-    return () => {
-      cancelled = true;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-    };
-  }, [mediaPreferences.video]);
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-[#111113] px-3 py-4 pb-[env(safe-area-inset-bottom)] sm:px-4 sm:py-6">
-      <div className="w-full max-w-5xl text-white">
-        <div className="grid gap-4 sm:gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-          {/* ── Left: Live preview ── */}
-          <section className="relative overflow-hidden rounded-3xl bg-[#1a1a1f]">
-            <div className="relative aspect-[16/10] w-full sm:aspect-[4/3] lg:aspect-auto lg:h-full lg:min-h-[480px]">
-              {mediaPreferences.video ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="h-full w-full object-cover"
-                  style={{ transform: "scaleX(-1)" }}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(ellipse_at_center,#222225,#1a1a1f)]">
-                  <div className="text-center">
-                    <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-white/[0.06]">
-                      <User className="h-12 w-12 text-white/25" />
-                    </div>
-                    <p className="mt-4 text-sm text-white/35">Camera is off</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Overlay info */}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-5 pb-5 pt-12">
-                <p className="text-lg font-semibold">{title}</p>
-                <p className="mt-0.5 text-sm text-white/50">{subtitle}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${mediaPreferences.video ? "bg-white/15 text-white/80" : "bg-white/10 text-white/50"}`}>
-                    {mediaPreferences.video ? <Camera className="h-3 w-3" /> : <CameraOff className="h-3 w-3" />}
-                    {mediaPreferences.video ? "Camera on" : "Camera off"}
-                  </span>
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${mediaPreferences.audio ? "bg-white/15 text-white/80" : "bg-white/10 text-white/50"}`}>
-                    {mediaPreferences.audio ? <Mic className="h-3 w-3" /> : <MicOff className="h-3 w-3" />}
-                    {mediaPreferences.audio ? "Mic on" : "Muted"}
-                  </span>
-                </div>
-              </div>
-
-              {/* Patient waiting badge */}
-              {patientIsWaiting ? (
-                <div className="absolute right-4 top-4">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-200 backdrop-blur-md">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
-                    </span>
-                    Patient waiting
-                  </span>
-                </div>
-              ) : null}
-            </div>
-          </section>
-
-          {/* ── Right: Setup panel ── */}
-          <section className="rounded-2xl border border-white/[0.06] bg-[#161618] p-4 sm:rounded-3xl sm:p-6 md:p-7">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/30">Doctor setup</p>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
-              Join consultation
-            </h1>
-            <p className="mt-1.5 text-sm leading-relaxed text-white/45 sm:mt-2">
-              Check your mic and camera, then enter the room.
-            </p>
-
-            {patientIsWaiting ? (
-              <div className="mt-5 rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.07] p-4 text-sm">
-                <p className="font-medium text-emerald-300">Patient is waiting</p>
-                <p className="mt-1 leading-relaxed text-emerald-300/60">
-                  The patient has joined the waiting room and is ready for the consultation.
-                </p>
-              </div>
-            ) : null}
-
-            {/* Media toggles */}
-            <div className="mt-6 grid gap-2.5">
-              <MediaToggleCard
-                active={mediaPreferences.video}
-                title="Camera"
-                description={mediaPreferences.video ? "Joining with video" : "Joining without camera"}
-                icon={mediaPreferences.video ? Camera : CameraOff}
-                onClick={onToggleVideo}
-              />
-              <MediaToggleCard
-                active={mediaPreferences.audio}
-                title="Microphone"
-                description={mediaPreferences.audio ? "Joining with audio" : "Joining muted"}
-                icon={mediaPreferences.audio ? Mic : MicOff}
-                onClick={onToggleAudio}
-              />
-            </div>
-
-            {joinError ? (
-              <div className="mt-4 rounded-2xl border border-red-500/15 bg-red-500/[0.07] p-4 text-sm">
-                <p className="font-medium text-red-300">Could not start media</p>
-                <p className="mt-1 leading-relaxed text-red-300/60">{joinError}</p>
-              </div>
-            ) : null}
-
-            {/* Patient info */}
-            <div className="mt-5 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-white/35">Patient</span>
-                  <span className="font-medium text-white/80">{title}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/35">Scheduled</span>
-                  <span className="text-white/60">{subtitle || "-"}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="mt-6 grid gap-2.5">
-              <Button
-                variant="brand"
-                className="h-12 w-full rounded-2xl text-sm font-semibold"
-                loading={joining}
-                onClick={onJoin}
-              >
-                <Video className="h-4 w-4" />
-                Join consultation
-              </Button>
-              <Button
-                variant="outline"
-                className="h-12 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white sm:h-11"
-                disabled={joining}
-                onClick={onJoinWithoutMedia}
-              >
-                <Phone className="h-4 w-4" />
-                Join without media
-              </Button>
-            </div>
-
-            <button
-              type="button"
-              className="mt-4 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm text-white/40 transition hover:text-white/60"
-              onClick={onBack}
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back to appointments
-            </button>
-          </section>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-function MediaToggleCard({
-  active,
-  title,
-  description,
-  icon: Icon,
-  onClick,
-}: {
-  active: boolean;
-  title: string;
-  description: string;
-  icon: typeof Camera;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex items-center gap-3 rounded-2xl border p-3.5 text-left transition ${
-        active
-          ? "border-brand/20 bg-brand/[0.08] text-white"
-          : "border-white/[0.06] bg-white/[0.03] text-white/60"
-      }`}
-    >
-      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${active ? "bg-brand text-white" : "bg-white/[0.06] text-white/40"}`}>
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="mt-0.5 text-xs text-white/40">{description}</p>
-      </div>
-      <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${active ? "bg-brand/20 text-brand" : "bg-white/[0.06] text-white/35"}`}>
-        {active ? "ON" : "OFF"}
-      </span>
-    </button>
-  );
-}
 
 function DoctorInfoPanel({ appointment }: { appointment: DoctorAppointment }) {
   return (

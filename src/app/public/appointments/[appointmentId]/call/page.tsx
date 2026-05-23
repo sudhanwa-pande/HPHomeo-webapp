@@ -3,11 +3,10 @@
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { 
   LiveKitRoom, 
-  VideoConference, 
   PreJoin,
   LocalUserChoices
 } from "@livekit/components-react";
@@ -16,7 +15,11 @@ import { CheckCircle2, Loader2, User } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
 import { getApiError, getRateLimitDescription, isNetworkError, isRateLimitError } from "@/lib/api";
-import { LIVEKIT_ROOM_OPTIONS } from "@/lib/media";
+import {
+  buildPreferredAudioConstraints,
+  buildPreferredVideoConstraints,
+  LIVEKIT_ROOM_OPTIONS,
+} from "@/lib/media";
 import { notifyError, notifyInfo } from "@/lib/notify";
 import {
   createPublicAccessSession,
@@ -25,8 +28,8 @@ import {
   scrubPublicMagicTokenFromUrl,
 } from "@/lib/public-api";
 import { useEventStream } from "@/hooks/use-event-stream";
-import { ConnectionObserver } from "@/components/call/connection-observer";
 import { useWakeLock } from "@/hooks/use-wake-lock";
+import { LiveCallRoom } from "@/components/call/live-call-room";
 import { Button } from "@/components/ui/button";
 import type { PublicAppointment } from "@/types/public";
 import type { VideoTokenResponse } from "@/types/doctor";
@@ -45,10 +48,10 @@ function formatEarlyJoinDescription(scheduledAt: string, opensAt: Date) {
 
 function PublicCallPageClient() {
   const params = useParams<{ appointmentId: string }>();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const appointmentId = params.appointmentId;
   const joinInFlightRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
   const isMountedRef = useRef(true);
 
   // Keep screen awake during consultation
@@ -60,12 +63,31 @@ function PublicCallPageClient() {
     };
   }, []);
 
+  // Safety net: stop all camera/mic tracks when this page unmounts
+  useEffect(() => {
+    return () => {
+      document.querySelectorAll("video, audio").forEach((el) => {
+        const media = el as HTMLMediaElement;
+        if (media.srcObject instanceof MediaStream) {
+          media.srcObject.getTracks().forEach((t) => t.stop());
+          media.srcObject = null;
+        }
+      });
+    };
+  }, []);
+
   const [accessReady, setAccessReady] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<VideoTokenResponse | null>(null);
+  const [mediaPreferences, setMediaPreferences] = useState<{audio: boolean; video: boolean}>({
+    audio: true,
+    video: true,
+  });
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [callEnded, setCallEnded] = useState(false);
+  const callEndedRef = useRef(false);
+  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Bootstrap access token
@@ -105,9 +127,11 @@ function PublicCallPageClient() {
     [appointment, nowMs],
   );
 
+  // keepAlive prevents disconnect on mobile tab switch during active calls.
   useEventStream({
     path: `/public/events/stream/${appointmentId}`,
     enabled: accessReady && !accessError && Boolean(appointmentId),
+    keepAlive: Boolean(tokenData),
     onEvent: {
       call_state_changed: () => {
         queryClient.invalidateQueries({ queryKey: ["public-appointment-call", appointmentId] });
@@ -155,6 +179,10 @@ function PublicCallPageClient() {
         );
         if (isMountedRef.current) {
           setTokenData(data);
+          setMediaPreferences({
+            audio: values.audioEnabled,
+            video: values.videoEnabled,
+          });
         }
       } catch (error) {
         const apiMessage = getApiError(error);
@@ -172,16 +200,57 @@ function PublicCallPageClient() {
 
   // Disconnect room if appointment status becomes "ended"
   useEffect(() => {
+    if (callEnded) return;
     if (appointment?.call_status === "ended") {
+      callEndedRef.current = true;
       setTokenData(null);
       setCallEnded(true);
     }
-  }, [appointment?.call_status]);
+  }, [appointment?.call_status, callEnded]);
 
-  const handleDisconnect = useCallback(() => {
-    setTokenData(null);
-    setCallEnded(true);
+  const handleDisconnect = useCallback((reason?: unknown) => {
+    // Don't show "connection dropped" if the call was intentionally ended
+    if (callEndedRef.current) return;
+    const reasonStr = String(reason);
+    if (["server_shutdown", "room_deleted", "user_rejected", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
+      setTokenData(null);
+      setCallStartedAt(null);
+      setJoinError("Connection dropped. Please click Join to re-enter the consultation.");
+    } else {
+      setTokenData(null);
+      setCallStartedAt(null);
+    }
   }, []);
+
+  const handleMediaDeviceFailure = useCallback(
+    (_failure?: unknown, kind?: string) => {
+      const message =
+        kind === "audioinput"
+          ? "Microphone access failed. You can stay in the call muted."
+          : "Camera access failed. You can stay in the call without video.";
+      setJoinError(message);
+      notifyError("Media access issue", message);
+    },
+    [],
+  );
+
+  const tokenRefresher = useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      throw new Error("Token refresh already in progress");
+    }
+    refreshInFlightRef.current = true;
+    try {
+      const { data } = await publicApi.post<VideoTokenResponse>(
+        `/public/appointments/${appointmentId}/video-token`,
+        {},
+      );
+      return data.token;
+    } finally {
+      if (isMountedRef.current) {
+        refreshInFlightRef.current = false;
+      }
+    }
+  }, [appointmentId]);
 
   const canJoin = Boolean(
     appointment &&
@@ -339,20 +408,54 @@ function PublicCallPageClient() {
     );
   }
 
-  // Active Call (VideoConference)
+  // Active Call — consistent LiveCallRoom UI
   return (
     <LiveKitRoom
       key={appointmentId}
       serverUrl={tokenData.server_url}
       token={tokenData.token}
       connect
+      audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
+      video={buildPreferredVideoConstraints(mediaPreferences.video)}
       options={LIVEKIT_ROOM_OPTIONS}
       className="h-screen"
-      data-lk-theme="default"
       onDisconnected={handleDisconnect}
+      onMediaDeviceFailure={handleMediaDeviceFailure}
     >
-      <ConnectionObserver />
-      <VideoConference />
+      <LiveCallRoom
+        title={appointment.doctor_name ?? "Doctor"}
+        subtitle={`${format(parseISO(appointment.scheduled_at), "hh:mm a")} · Consultation`}
+        remoteLabel={appointment.doctor_name ?? "Doctor"}
+        remoteWaitingTitle={`Waiting for Dr. ${(appointment.doctor_name ?? "Doctor").split(" ").pop()}`}
+        remoteWaitingDescription="You're in the consultation room. The doctor will appear here as soon as they join."
+        onLeave={() => setTokenData(null)}
+        onBack={() => setTokenData(null)}
+        onConnected={() => setCallStartedAt(Date.now())}
+        tokenRefresher={tokenRefresher}
+        endLabel="Leave call"
+        callStartedAt={callStartedAt}
+        infoLabel="Appointment details"
+        infoContent={
+          <div className="space-y-3 rounded-xl bg-white/6 p-4 text-sm text-white">
+            <div className="flex justify-between">
+              <span className="text-white/45">Doctor</span>
+              <span className="text-white/85">{appointment.doctor_name ?? "Doctor"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-white/45">Date</span>
+              <span className="text-white/85">
+                {format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy")}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-white/45">Time</span>
+              <span className="text-white/85">
+                {format(parseISO(appointment.scheduled_at), "hh:mm a")}
+              </span>
+            </div>
+          </div>
+        }
+      />
     </LiveKitRoom>
   );
 }
