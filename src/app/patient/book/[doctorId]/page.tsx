@@ -125,8 +125,12 @@ function BookingContent() {
             patientEmail: patient?.email,
             patientPhone: patient?.phone,
             description: `Consultation with ${doctor?.full_name || "Doctor"}`,
-            onSuccess: () => {
+            onSuccess: (response: any) => {
               console.log("Payment success callback received from Razorpay.");
+              if (response.isVerified) {
+                (bookingData as any).status = "confirmed";
+                (bookingData as any).payment_status = "paid";
+              }
               resolve(bookingData);
             },
             onDismiss: () => {
@@ -149,7 +153,9 @@ function BookingContent() {
     },
     onSuccess: (data) => {
       setBookedData(data);
-      if (needsPayment && data.status === "pending_payment") {
+      if (data.status === "confirmed" && (data as any).payment_status === "paid") {
+        setStep("success");
+      } else {
         setStep("verifying");
         localStorage.setItem(VERIFICATION_KEY, JSON.stringify({
           version: 1,
@@ -158,18 +164,11 @@ function BookingContent() {
           startedAt: Date.now(),
           expiresAt: Date.now() + 5 * 60 * 1000
         }));
-      } else {
-        setStep("success");
       }
     },
     onError: (error) => {
-      setStep("confirm");
-      if (error instanceof Error && error.message === "PAYMENT_DISMISSED") {
-        notifyInfo("Payment not completed", "Your appointment is reserved. Complete payment from the appointments page.");
-        router.push("/patient/appointments");
-        return;
-      }
-      notifyError("Booking failed", getApiError(error));
+      setProcessingMessage("Booking failed. Please try again.");
+      setTimeout(() => setStep("confirm"), 2000);
     },
   });
 
@@ -177,42 +176,19 @@ function BookingContent() {
   const stepOrder: BookingStep[] = ["select-date", "select-mode", "confirm"];
   const currentIdx = stepOrder.indexOf(step);
 
-  // Restore verification state from localStorage
+  /* ─── Webhook Polling & Resumption ─── */
+
+  // 1. Resume from storage on reload
   useEffect(() => {
-    const restoreVerification = async () => {
+    const restoreVerification = () => {
       try {
         const stored = localStorage.getItem(VERIFICATION_KEY);
         if (!stored) return;
-
-        const parsed: VerificationState = JSON.parse(stored);
-        if (parsed.version !== 1) return;
-
-        if (Date.now() > parsed.expiresAt) {
+        const parsed = JSON.parse(stored);
+        if (parsed.expiresAt < Date.now()) {
           localStorage.removeItem(VERIFICATION_KEY);
           return;
         }
-
-        // Fetch immediate status
-        const { data } = await api.get(`/patient/appointments/${parsed.appointmentId}`);
-
-        const isPaid = data.status === "confirmed" && data.payment_status === "paid";
-        const isFailed = data.payment_status === "failed" || data.payment_status === "refunded" || data.status === "cancelled";
-
-        if (isPaid) {
-          setBookedData(parsed.bookingData);
-          setStep("success");
-          localStorage.removeItem(VERIFICATION_KEY);
-          return;
-        }
-
-        if (isFailed) {
-          setBookedData(parsed.bookingData);
-          setStep("failed");
-          localStorage.removeItem(VERIFICATION_KEY);
-          return;
-        }
-
-        // Still pending
         setBookedData(parsed.bookingData);
         setStep("verifying");
       } catch (err) {
@@ -244,7 +220,7 @@ function BookingContent() {
       attemptsRef.current++;
       try {
         console.log(`Polling appointment status (attempt ${attemptsRef.current}/${maxAttempts})...`);
-        const { data } = await api.get(`/patient/appointments/${bookedData.appointment_id}`, {
+        const { data } = await api.get(`/patient/appointments/${bookedData.appointment_id}?t=${Date.now()}`, {
           signal: abortController.signal
         });
 

@@ -7,9 +7,9 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { 
   LiveKitRoom, 
-  LocalUserChoices
+  LocalUserChoices,
+  PreJoin
 } from "@livekit/components-react";
-import { CustomPreJoin } from "@/components/call/custom-pre-join";
 import "@livekit/components-styles";
 import { ArrowLeft, CheckCircle2, Loader2, User } from "lucide-react";
 import { format, parseISO } from "date-fns";
@@ -309,27 +309,6 @@ function PatientCallContent() {
   if (!tokenData) {
     return (
       <div className="relative h-screen bg-[#111113] flex flex-col" data-lk-theme="default">
-        {/* Banner context (Bug 4 Fix part A) */}
-        <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-center p-4 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
-          <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-6 py-3 rounded-full border border-white/10 shadow-xl pointer-events-auto">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/20">
-              <User className="h-5 w-5 text-brand" />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold text-white">Dr. {appointment.doctor_name}</span>
-              <span className="text-xs text-white/60">
-                {format(parseISO(appointment.scheduled_at), "hh:mm a")} • Consultation
-              </span>
-            </div>
-            {isDoctorConnected && (
-              <div className="flex items-center gap-1.5 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">Doctor is waiting</span>
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* Loading overlay when API token is fetching (Bug 4 Fix part B) */}
         {joining && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -340,10 +319,12 @@ function PatientCallContent() {
           </div>
         )}
 
-        <div className="flex-1">
-          <CustomPreJoin
-            onSubmit={joinCall}
-            patientName="Patient"
+        <div className="flex-1 flex items-center justify-center">
+          <PreJoin
+            onSubmit={async (values) => {
+              joinCall(values);
+            }}
+            defaults={{ audioEnabled: true, videoEnabled: true }}
           />
         </div>
       </div>

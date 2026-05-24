@@ -56,6 +56,7 @@ export async function beginPatientAppointmentPayment({
     patientPhone: patientPhone ?? undefined,
     description,
     onSuccess: async (response) => {
+      let isVerified = false;
       try {
         const verifyPromise = api.post("/patient/payments/verify", {
           appointment_id: appointmentId,
@@ -66,13 +67,14 @@ export async function beginPatientAppointmentPayment({
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error("Verification timeout")), 4000)
         );
-        await Promise.race([verifyPromise, timeoutPromise]);
+        const res = await Promise.race([verifyPromise, timeoutPromise]) as any;
+        if (res?.data?.status === "verified") {
+          isVerified = true;
+        }
       } catch (err) {
         console.error("Synchronous payment verification failed or timed out:", err);
-        // Even if the sync call fails (network issue or timeout), the webhook will likely succeed.
-        // We still trigger onSuccess to let the UI proceed (which will fall back to polling).
       }
-      onSuccess(response);
+      onSuccess({ ...response, isVerified } as any);
     },
     onDismiss,
   });

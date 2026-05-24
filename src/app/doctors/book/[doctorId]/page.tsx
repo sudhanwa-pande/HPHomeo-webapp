@@ -279,7 +279,7 @@ export default function BookDoctorPage() {
       try {
         console.log(`Polling appointment status (attempt ${attemptsRef.current}/${maxAttempts})...`);
         const { data } = await api.get<any>(
-          `/public/appointments/${bookingSuccess.appointment_id}`,
+          `/public/appointments/${bookingSuccess.appointment_id}?t=${Date.now()}`,
           { 
             signal: abortController.signal,
             _skipAuthRefresh: true 
@@ -481,7 +481,13 @@ export default function BookDoctorPage() {
                 const timeoutPromise = new Promise((_, reject) => 
                   setTimeout(() => reject(new Error("Verification timeout")), 4000)
                 );
-                await Promise.race([verifyPromise, timeoutPromise]);
+                const res = await Promise.race([verifyPromise, timeoutPromise]) as any;
+                if (res?.data?.status === "verified") {
+                  setPaymentCompleted(true);
+                  setBookingSuccess(data);
+                  setVerificationStatus("success");
+                  return;
+                }
               } catch (e) {
                 console.error("Sync verification failed or timed out:", e);
               }
@@ -574,7 +580,12 @@ export default function BookDoctorPage() {
               const timeoutPromise = new Promise((_, reject) => 
                 setTimeout(() => reject(new Error("Verification timeout")), 4000)
               );
-              await Promise.race([verifyPromise, timeoutPromise]);
+              const res = await Promise.race([verifyPromise, timeoutPromise]) as any;
+              if (res?.data?.status === "verified") {
+                setPaymentCompleted(true);
+                setVerificationStatus("success");
+                return;
+              }
             } catch (e) {
               console.error("Sync verification failed or timed out:", e);
             }
