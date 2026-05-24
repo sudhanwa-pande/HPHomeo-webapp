@@ -623,7 +623,7 @@ export function LiveCallRoom({
                   participant: remoteParticipants[0],
                   source: Track.Source.Camera,
                 }}
-                className="h-full w-full bg-[#111113] [&>video]:object-cover"
+                className="h-full w-full bg-[#111113] [&>video]:object-contain"
                 disableSpeakingIndicator
               />
             ) : (
@@ -721,7 +721,7 @@ export function LiveCallRoom({
               )}
               style={{
                 bottom: isMobileViewport
-                  ? "calc(7.5rem + 30vw + env(safe-area-inset-bottom, 0px))"
+                  ? "calc(6.5rem + 30vw + env(safe-area-inset-bottom, 0px))"
                   : "18.5rem",
                 right: isMobileViewport ? "12px" : "20px",
               }}
@@ -769,7 +769,7 @@ export function LiveCallRoom({
             )}
             style={{
               bottom: isMobileViewport
-                ? "calc(7.5rem + env(safe-area-inset-bottom, 0px))"
+                ? "calc(6.5rem + env(safe-area-inset-bottom, 0px))"
                 : "6.5rem",
               right: isMobileViewport ? "12px" : "20px",
             }}
@@ -799,7 +799,7 @@ export function LiveCallRoom({
               isMobileViewport
                 ? mobileChromeVisible
                   ? "translate-y-0 opacity-100"
-                  : "translate-y-6 opacity-0"
+                  : "translate-y-full opacity-0"
                 : "translate-y-0 opacity-100",
             )}
             style={{

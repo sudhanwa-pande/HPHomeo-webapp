@@ -7,9 +7,9 @@ import { useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { 
   LiveKitRoom, 
-  PreJoin,
   LocalUserChoices
 } from "@livekit/components-react";
+import { CustomPreJoin } from "@/components/call/custom-pre-join";
 import "@livekit/components-styles";
 import { CheckCircle2, Loader2, User } from "lucide-react";
 import { format, parseISO } from "date-fns";
@@ -394,14 +394,9 @@ function PublicCallPageClient() {
         )}
 
         <div className="flex-1">
-          <PreJoin
-            onError={(err) => console.log('Media error (ignored in UI)', err)}
-            defaults={{
-              audioEnabled: true,
-              videoEnabled: true,
-            }}
+          <CustomPreJoin
             onSubmit={joinCall}
-            className="h-full"
+            patientName="Patient"
           />
         </div>
       </div>

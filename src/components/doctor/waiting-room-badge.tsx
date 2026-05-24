@@ -133,7 +133,7 @@ export function WaitingRoomBadge() {
                               hour: "2-digit",
                               minute: "2-digit",
                             })
-                          : "â€”"}
+                          : "—"}
                       </span>
                       <span className="flex h-1 w-1 rounded-full bg-emerald-400 animate-pulse" />
                       <span className="text-emerald-600 font-medium">Waiting</span>

@@ -55,7 +55,25 @@ export async function beginPatientAppointmentPayment({
     patientEmail: patientEmail ?? undefined,
     patientPhone: patientPhone ?? undefined,
     description,
-    onSuccess,
+    onSuccess: async (response) => {
+      try {
+        const verifyPromise = api.post("/patient/payments/verify", {
+          appointment_id: appointmentId,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_order_id: response.razorpay_order_id,
+          razorpay_signature: response.razorpay_signature,
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Verification timeout")), 4000)
+        );
+        await Promise.race([verifyPromise, timeoutPromise]);
+      } catch (err) {
+        console.error("Synchronous payment verification failed or timed out:", err);
+        // Even if the sync call fails (network issue or timeout), the webhook will likely succeed.
+        // We still trigger onSuccess to let the UI proceed (which will fall back to polling).
+      }
+      onSuccess(response);
+    },
     onDismiss,
   });
 

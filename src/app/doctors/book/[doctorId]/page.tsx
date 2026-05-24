@@ -466,8 +466,26 @@ export default function BookDoctorPage() {
             patientEmail: patientEmail.trim() || undefined,
             patientPhone: patientPhone.trim(),
             description: `Consultation with ${doctor?.full_name || "Doctor"}`,
-            onSuccess: () => {
+            onSuccess: async (response: any) => {
               console.log("Payment success callback received from Razorpay.");
+              
+              try {
+                const verifyPromise = api.post("/public/payments/verify", {
+                  appointment_id: data.appointment_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_signature: response.razorpay_signature,
+                }, {
+                  headers: { "x-patient-access-token": data.patient_access_token }
+                });
+                const timeoutPromise = new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error("Verification timeout")), 4000)
+                );
+                await Promise.race([verifyPromise, timeoutPromise]);
+              } catch (e) {
+                console.error("Sync verification failed or timed out:", e);
+              }
+
               setBookingSuccess(data);
               setVerificationStatus("verifying");
               localStorage.setItem(VERIFICATION_KEY, JSON.stringify({
@@ -540,8 +558,28 @@ export default function BookDoctorPage() {
         patientEmail: patientEmail.trim() || undefined,
         patientPhone: patientPhone.trim(),
         description: `Consultation with ${doctor?.full_name || "Doctor"}`,
-        onSuccess: () => {
+        onSuccess: async (response: any) => {
           console.log("Payment success callback received from Razorpay during retry.");
+          
+          if (bookingSuccess) {
+            try {
+              const verifyPromise = api.post("/public/payments/verify", {
+                appointment_id: bookingSuccess.appointment_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature,
+              }, {
+                headers: { "x-patient-access-token": bookingSuccess.patient_access_token }
+              });
+              const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Verification timeout")), 4000)
+              );
+              await Promise.race([verifyPromise, timeoutPromise]);
+            } catch (e) {
+              console.error("Sync verification failed or timed out:", e);
+            }
+          }
+
           setVerificationStatus("verifying");
           if (bookingSuccess) {
             localStorage.setItem(VERIFICATION_KEY, JSON.stringify({
@@ -637,7 +675,7 @@ export default function BookDoctorPage() {
             >
               <Loader2 className="mx-auto mb-4 h-12 w-12 animate-spin text-brand" />
               <h2 className="text-xl font-bold tracking-tight text-gray-900">
-                Verifying Payment...
+                Payment received. Confirming your booking...
               </h2>
               <p className="mt-2 text-sm text-gray-500">
                 Please don't close or refresh this window. We are confirming your payment with the gateway.

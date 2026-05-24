@@ -434,7 +434,7 @@ function BookingContent() {
                     <Loader2 className="h-8 w-8 animate-spin text-brand" />
                   </div>
                   <h2 className="type-h3 mb-2">
-                    {step === "verifying" ? "Verifying Payment..." : processingMessage}
+                    {step === "verifying" ? "Payment received. Confirming your booking..." : processingMessage}
                   </h2>
                   <p className="text-sm text-gray-500">
                     {step === "verifying"
