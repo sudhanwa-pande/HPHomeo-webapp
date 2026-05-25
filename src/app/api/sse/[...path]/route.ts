@@ -20,18 +20,17 @@ export const dynamic = "force-dynamic";
 // Disable response body size limit for long-lived streams
 export const maxDuration = 300; // 5 minutes max (serverless/Vercel)
 
-const rawProxyTarget = process.env.API_PROXY_TARGET;
-if (!rawProxyTarget) {
-  throw new Error(
-    "API_PROXY_TARGET is not set. SSE proxy cannot start without a backend origin.",
-  );
-}
-const API_PROXY_TARGET = rawProxyTarget.replace(/\/$/, "");
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
+  const rawProxyTarget = process.env.API_PROXY_TARGET;
+  if (!rawProxyTarget) {
+    console.error("API_PROXY_TARGET is not set.");
+    return new Response("Configuration Error: API_PROXY_TARGET not set", { status: 500 });
+  }
+  const API_PROXY_TARGET = rawProxyTarget.replace(/\/$/, "");
+
   const { path } = await params;
   const backendPath = `/api/v1/${path.join("/")}`;
   const search = request.nextUrl.search; // preserves ?key=value params

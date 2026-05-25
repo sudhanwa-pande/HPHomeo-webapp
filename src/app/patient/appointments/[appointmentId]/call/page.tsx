@@ -5,21 +5,14 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { 
-  LiveKitRoom, 
-  LocalUserChoices,
-  PreJoin
-} from "@livekit/components-react";
+import { LiveKitRoom, LocalUserChoices } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { ArrowLeft, CheckCircle2, Loader2, User } from "lucide-react";
 import { format, parseISO } from "date-fns";
+import { CustomPreJoin } from "@/components/call/custom-pre-join";
 
 import api, { getApiError, getRateLimitDescription, isNetworkError, isRateLimitError } from "@/lib/api";
-import {
-  buildPreferredAudioConstraints,
-  buildPreferredVideoConstraints,
-  LIVEKIT_ROOM_OPTIONS,
-} from "@/lib/media";
+import { LIVEKIT_ROOM_OPTIONS } from "@/lib/media";
 import { formatTime, formatDate } from "@/lib/appointment-utils";
 import { notifyError, notifyInfo } from "@/lib/notify";
 import { useEventStream } from "@/hooks/use-event-stream";
@@ -305,85 +298,67 @@ function PatientCallContent() {
     );
   }
 
-  // Lobby (PreJoin) - Acquires hardware locks seamlessly BEFORE joining
-  if (!tokenData) {
-    return (
-      <div className="relative h-screen bg-[#111113] flex flex-col" data-lk-theme="default">
-        {/* Loading overlay when API token is fetching (Bug 4 Fix part B) */}
-        {joining && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="h-8 w-8 animate-spin text-brand" />
-              <p className="text-white/80 font-medium">Connecting to secure room...</p>
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 flex items-center justify-center">
-          <PreJoin
-            onSubmit={async (values) => {
-              joinCall(values);
-            }}
-            defaults={{ audioEnabled: true, videoEnabled: true }}
+  // Unified Render with Fake Instant Join Handoff
+  return (
+    <div className="relative h-screen bg-[#111113] flex flex-col" data-lk-theme="default">
+      {/* 1. Lobby (PreJoin) - Acquires hardware locks seamlessly BEFORE joining. Stays mounted with a blur until connected. */}
+      {(!tokenData || !callStartedAt) && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#060B14]">
+          <CustomPreJoin
+            onSubmit={joinCall}
+            patientName={appointment?.patient_name || "Patient"}
+            isJoining={joining || !!tokenData}
           />
         </div>
-      </div>
-    );
-  }
+      )}
 
-  // Active Call — consistent LiveCallRoom UI (same as waiting room flow)
-  return (
-    <LiveKitRoom
-      key={appointmentId}
-      serverUrl={tokenData.server_url}
-      token={tokenData.token}
-      connect
-      audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
-      video={buildPreferredVideoConstraints(mediaPreferences.video)}
-      options={LIVEKIT_ROOM_OPTIONS}
-      className="h-screen"
-      onDisconnected={handleDisconnect}
-      onMediaDeviceFailure={handleMediaDeviceFailure}
-    >
-      <LiveCallRoom
-        title={appointment.doctor_name}
-        subtitle={`${formatDate(appointment.scheduled_at)} · ${formatTime(appointment.scheduled_at)}`}
-        remoteLabel={appointment.doctor_name}
-        remoteWaitingTitle={`Waiting for Dr. ${appointment.doctor_name.split(" ").pop()}`}
-        remoteWaitingDescription="You're in the consultation room. The doctor will appear here as soon as they join."
-        onLeave={() =>
-          router.push(`/patient/appointments/${appointmentId}`)
-        }
-        onBack={() =>
-          router.push(`/patient/appointments/${appointmentId}`)
-        }
-        onConnected={() => setCallStartedAt(Date.now())}
-        tokenRefresher={tokenRefresher}
-        endLabel="Leave call"
-        callStartedAt={callStartedAt}
-        infoLabel="Appointment details"
-        infoContent={
-          <div className="space-y-3 rounded-xl bg-white/6 p-4 text-sm text-white">
-            <div className="flex justify-between">
-              <span className="text-white/45">Doctor</span>
-              <span className="text-white/85">{appointment.doctor_name}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/45">Date</span>
-              <span className="text-white/85">
-                {formatDate(appointment.scheduled_at)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/45">Time</span>
-              <span className="text-white/85">
-                {formatTime(appointment.scheduled_at)}
-              </span>
-            </div>
-          </div>
-        }
-      />
-    </LiveKitRoom>
+      {/* 2. Active Call — mounts WebRTC in the background, auto-acquires nothing */}
+      {tokenData && (
+        <LiveKitRoom
+          key={appointmentId}
+          serverUrl={tokenData.server_url}
+          token={tokenData.token}
+          connect={true}
+          audio={false}
+          video={false}
+          options={LIVEKIT_ROOM_OPTIONS}
+          className="h-full w-full"
+          onDisconnected={handleDisconnect}
+          onMediaDeviceFailure={handleMediaDeviceFailure}
+        >
+          <LiveCallRoom
+            title={appointment.doctor_name}
+            subtitle={`${formatDate(appointment.scheduled_at)} · ${formatTime(appointment.scheduled_at)}`}
+            remoteLabel={appointment.doctor_name}
+            remoteWaitingTitle={`Waiting for Dr. ${appointment.doctor_name.split(" ").pop()}`}
+            remoteWaitingDescription="You're in the consultation room. The doctor will appear here as soon as they join."
+            onLeave={() => router.push(`/patient/appointments/${appointmentId}`)}
+            onBack={() => router.push(`/patient/appointments/${appointmentId}`)}
+            onConnected={() => setCallStartedAt(Date.now())}
+            tokenRefresher={tokenRefresher}
+            endLabel="Leave call"
+            callStartedAt={callStartedAt}
+            infoLabel="Appointment details"
+            infoContent={
+              <div className="space-y-3 rounded-xl bg-white/6 p-4 text-sm text-white">
+                <div className="flex justify-between">
+                  <span className="text-white/45">Doctor</span>
+                  <span className="text-white/85">{appointment.doctor_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/45">Date</span>
+                  <span className="text-white/85">{formatDate(appointment.scheduled_at)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/45">Time</span>
+                  <span className="text-white/85">{formatTime(appointment.scheduled_at)}</span>
+                </div>
+              </div>
+            }
+          />
+        </LiveKitRoom>
+      )}
+    </div>
   );
 }
 

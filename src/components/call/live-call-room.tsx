@@ -38,6 +38,8 @@ import { motion } from "framer-motion";
 
 import { notifyError, notifyInfo } from "@/lib/notify";
 import { playIncomingMessageSound } from "@/lib/sound";
+import { mediaManager } from "@/lib/media-manager";
+import { logEvent } from "@/lib/logger";
 import {
   getMediaDeviceErrorMessage,
   getPreferredCameraDevice,
@@ -177,7 +179,7 @@ export function LiveCallRoom({
   // Fires onConnected exactly once when the room first reaches Connected
   const connectedOnceRef = useRef(false);
 
-  // ── 1. onConnected — fire when first Connected (accurate callStartedAt) ──
+  // ── 1. Publish manual tracks exactly once when Connected ──
   useEffect(() => {
     if (
       connectionState === ConnectionState.Connected &&
@@ -187,6 +189,19 @@ export function LiveCallRoom({
       onConnected?.();
     }
   }, [connectionState, onConnected]);
+
+  useEffect(() => {
+    if (connectionState === ConnectionState.Connected && localParticipant) {
+      if (mediaManager.videoTrack && !localParticipant.getTrackPublication(Track.Source.Camera)) {
+        localParticipant.publishTrack(mediaManager.videoTrack, { source: Track.Source.Camera })
+          .catch(e => logEvent("publish_failed", { error: String(e), type: "video" }));
+      }
+      if (mediaManager.audioTrack && !localParticipant.getTrackPublication(Track.Source.Microphone)) {
+        localParticipant.publishTrack(mediaManager.audioTrack, { source: Track.Source.Microphone })
+          .catch(e => logEvent("publish_failed", { error: String(e), type: "audio" }));
+      }
+    }
+  }, [connectionState, localParticipant]);
 
   // ── 2. Connection timeout — disconnect after 45 s if stuck Connecting ──
   useEffect(() => {
@@ -415,7 +430,17 @@ export function LiveCallRoom({
 
   async function toggleCamera() {
     try {
-      await localParticipant.setCameraEnabled(!isCameraEnabled);
+      if (mediaManager.videoTrack) {
+        if (isCameraEnabled) {
+          mediaManager.videoTrack.mute();
+          await localParticipant.setCameraEnabled(false);
+        } else {
+          mediaManager.videoTrack.unmute();
+          await localParticipant.setCameraEnabled(true);
+        }
+      } else {
+        await localParticipant.setCameraEnabled(!isCameraEnabled);
+      }
     } catch (error) {
       notifyError("Camera update failed", getMediaDeviceErrorMessage(error));
     }
@@ -423,10 +448,20 @@ export function LiveCallRoom({
 
   async function toggleMic() {
     try {
-      await localParticipant.setMicrophoneEnabled(
-        !isMicrophoneEnabled,
-        !isMicrophoneEnabled ? LIVEKIT_AUDIO_CAPTURE_OPTIONS : undefined,
-      );
+      if (mediaManager.audioTrack) {
+        if (isMicrophoneEnabled) {
+          mediaManager.audioTrack.mute();
+          await localParticipant.setMicrophoneEnabled(false);
+        } else {
+          mediaManager.audioTrack.unmute();
+          await localParticipant.setMicrophoneEnabled(true);
+        }
+      } else {
+        await localParticipant.setMicrophoneEnabled(
+          !isMicrophoneEnabled,
+          !isMicrophoneEnabled ? LIVEKIT_AUDIO_CAPTURE_OPTIONS : undefined,
+        );
+      }
     } catch (error) {
       notifyError("Microphone update failed", getMediaDeviceErrorMessage(error));
     }
@@ -441,50 +476,14 @@ export function LiveCallRoom({
   }
 
   async function switchCamera() {
-    if (!canSwitchCamera || !preferredFacingMode) return;
-    const nextFacingMode =
-      preferredFacingMode === "user" ? "environment" : "user";
+    if (!canSwitchCamera) return;
     setSwitchingCamera(true);
     try {
-      const activeTrack = localVideoTrack?.publication?.track;
-      if (!activeTrack && !isCameraEnabled) {
-        await localParticipant.setCameraEnabled(true, {
-          facingMode: nextFacingMode,
-        });
-      } else if (activeTrack && activeTrack instanceof LocalTrack) {
-        await activeTrack.restartTrack({ facingMode: nextFacingMode });
-      } else {
-        const activeDeviceId = room.getActiveDevice("videoinput");
-        const nextDevice = getPreferredCameraDevice(
-          videoDevices,
-          nextFacingMode,
-          activeDeviceId,
-        );
-        if (!nextDevice?.deviceId) {
-          throw new Error("No alternative camera is available on this device.");
-        }
-        await room.switchActiveDevice("videoinput", nextDevice.deviceId, false);
-      }
-      onFacingModeChange?.(nextFacingMode);
+      await mediaManager.flipCamera(room);
+      const currentFacingMode = mediaManager.videoTrack?.mediaStreamTrack.getSettings().facingMode as CameraFacingMode;
+      if (currentFacingMode) onFacingModeChange?.(currentFacingMode);
     } catch (error) {
-      try {
-        const activeDeviceId = room.getActiveDevice("videoinput");
-        const currentIndex = videoDevices.findIndex(
-          (d) => d.deviceId === activeDeviceId,
-        );
-        const fallback =
-          videoDevices[
-            currentIndex >= 0 ? (currentIndex + 1) % videoDevices.length : 0
-          ];
-        if (!fallback?.deviceId) throw error;
-        await room.switchActiveDevice("videoinput", fallback.deviceId, false);
-        onFacingModeChange?.(nextFacingMode);
-      } catch (fallbackError) {
-        notifyError(
-          "Camera switch failed",
-          getMediaDeviceErrorMessage(fallbackError),
-        );
-      }
+      notifyError("Camera switch failed", getMediaDeviceErrorMessage(error));
     } finally {
       setSwitchingCamera(false);
     }

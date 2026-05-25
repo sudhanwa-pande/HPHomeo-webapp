@@ -3,15 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LiveKitRoom, PreJoin, LocalUserChoices } from "@livekit/components-react";
+import { LiveKitRoom, LocalUserChoices } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { ArrowLeft, CheckCircle2, CircleAlert, Loader2, PhoneOff, User } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
 import api from "@/lib/api";
 import {
-  buildPreferredVideoConstraints,
-  buildPreferredAudioConstraints,
   getMediaDeviceErrorMessage,
   LIVEKIT_ROOM_OPTIONS,
 } from "@/lib/media";
@@ -19,6 +17,7 @@ import { notifyApiError, notifyError, notifySuccess } from "@/lib/notify";
 import { useEventStream } from "@/hooks/use-event-stream";
 import { AuthGuard } from "@/components/auth-guard";
 import { LiveCallRoom } from "@/components/call/live-call-room";
+import { CustomPreJoin } from "@/components/call/custom-pre-join";
 import { Button } from "@/components/ui/button";
 import type { DoctorAppointment } from "@/types/doctor";
 
@@ -445,107 +444,54 @@ function CallRoomContent() {
     );
   }
 
-  if (!tokenData) {
-    return (
-      <div className="relative h-screen w-full bg-[#111113]" data-lk-theme="default">
-        {/* Banner context */}
-        <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-center p-4 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
-          <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-6 py-3 rounded-full border border-white/10 shadow-xl pointer-events-auto">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/20">
-              <User className="h-5 w-5 text-brand" />
-            </div>
-            <div className="flex flex-col">
-              <p className="text-sm font-medium text-white">
-                {appointment?.patient?.full_name ?? "Patient"}
-              </p>
-              <p className="text-xs text-white/70">
-                {appointment ? format(parseISO(appointment.scheduled_at), "h:mm a") : ""}
-              </p>
-            </div>
-            {appointment?.call_status === "waiting" && (
-              <div className="ml-3 flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-500 border border-amber-500/20">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"></span>
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500"></span>
-                </span>
-                Patient is waiting
-              </div>
-            )}
-          </div>
-        </div>
-
-        <button 
-          onClick={() => {
-            clearResumeState();
-            router.push(`/doctor/appointments/${appointmentId}`);
-          }}
-          className="absolute top-6 left-6 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 transition-colors hover:bg-black/60 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 focus:ring-offset-[#111113]"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-
-        <div className="absolute inset-0 pt-20 pb-4 px-4 flex flex-col items-center justify-center">
-          <div className="w-full max-w-3xl overflow-hidden rounded-3xl border border-white/10 bg-[#161618] shadow-2xl relative">
-            <PreJoin
-              onError={(err) => console.log('Media error (ignored in UI)', err)}
-              defaults={{
-                audioEnabled: mediaPreferences.audio,
-                videoEnabled: mediaPreferences.video,
-              }}
-              onSubmit={joinCall}
-              className="h-full"
-            />
-            {joining && (
-              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                <div className="flex flex-col items-center gap-4 text-white">
-                  <Loader2 className="h-8 w-8 animate-spin text-brand" />
-                  <p className="text-sm font-medium">Connecting to room...</p>
-                </div>
-              </div>
-            )}
-          </div>
-          {joinError && (
-            <div className="mt-6 flex max-w-xl items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-400">
-              <CircleAlert className="h-5 w-5 shrink-0" />
-              <p className="text-sm">{joinError}</p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
+  // Unified Render with Fake Instant Join Handoff
   return (
-    <LiveKitRoom
-      key={appointmentId}
-      serverUrl={tokenData.server_url}
-      token={tokenData.token}
-      connect
-      audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
-      video={buildPreferredVideoConstraints(mediaPreferences.video)}
-      options={LIVEKIT_ROOM_OPTIONS}
-      onMediaDeviceFailure={handleMediaDeviceFailure}
-      onDisconnected={handleDisconnected}
-      className="h-screen"
-    >
-      <LiveCallRoom
-        title={appointment?.patient?.full_name ?? "Video consultation"}
-        subtitle={appointment ? format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy - hh:mm a") : "Consultation"}
-        remoteLabel={appointment?.patient?.full_name ?? "Patient"}
-        remoteWaitingTitle={appointment?.patient?.full_name ? `Waiting for ${appointment.patient.full_name}` : "Waiting for patient"}
-        remoteWaitingDescription="The patient will appear here when they join the consultation room."
-        onBack={() => router.push(`/doctor/appointments/${appointmentId}`)}
-        onLeave={() => endCallMutation.mutate()}
-        onConnected={() => setCallStartedAt(Date.now())}
-        tokenRefresher={tokenRefresher}
-        endLoading={endCallMutation.isPending}
-        endLabel="End consultation"
-        allowScreenShare
-        callStartedAt={callStartedAt}
-        infoLabel="Patient details"
-        infoContent={appointment ? <DoctorInfoPanel appointment={appointment} /> : null}
-      />
-    </LiveKitRoom>
+    <div className="relative h-screen bg-[#111113] flex flex-col" data-lk-theme="default">
+      {/* 1. Lobby (PreJoin) - Acquires hardware locks seamlessly BEFORE joining. Stays mounted with a blur until connected. */}
+      {(!tokenData || !callStartedAt) && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#060B14]">
+          <CustomPreJoin
+            onSubmit={joinCall}
+            patientName={appointment?.patient?.full_name || "Doctor"}
+            isJoining={joining || !!tokenData}
+          />
+        </div>
+      )}
+
+      {/* 2. Active Call — mounts WebRTC in the background, auto-acquires nothing */}
+      {tokenData && (
+        <LiveKitRoom
+          key={appointmentId}
+          serverUrl={tokenData.server_url}
+          token={tokenData.token}
+          connect={true}
+          audio={false}
+          video={false}
+          options={LIVEKIT_ROOM_OPTIONS}
+          onMediaDeviceFailure={handleMediaDeviceFailure}
+          onDisconnected={handleDisconnected}
+          className="h-full w-full"
+        >
+          <LiveCallRoom
+            title={appointment?.patient?.full_name ?? "Video consultation"}
+            subtitle={appointment ? format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy - hh:mm a") : "Consultation"}
+            remoteLabel={appointment?.patient?.full_name ?? "Patient"}
+            remoteWaitingTitle={appointment?.patient?.full_name ? `Waiting for ${appointment.patient.full_name}` : "Waiting for patient"}
+            remoteWaitingDescription="The patient will appear here when they join the consultation room."
+            onBack={() => router.push(`/doctor/appointments/${appointmentId}`)}
+            onLeave={() => endCallMutation.mutate()}
+            onConnected={() => setCallStartedAt(Date.now())}
+            tokenRefresher={tokenRefresher}
+            endLoading={endCallMutation.isPending}
+            endLabel="End consultation"
+            allowScreenShare
+            callStartedAt={callStartedAt}
+            infoLabel="Patient details"
+            infoContent={appointment ? <DoctorInfoPanel appointment={appointment} /> : null}
+          />
+        </LiveKitRoom>
+      )}
+    </div>
   );
 }
 
