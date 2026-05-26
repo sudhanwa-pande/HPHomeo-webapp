@@ -321,7 +321,7 @@ function PublicCallPageClient() {
 
   // Already ended
   if (appointment.call_status === "ended" || callEnded) {
-    return <ConsultationEnded />;
+    return <ConsultationEnded duration={appointment.duration_min} doctorName={appointment.doctor_name || undefined} />;
   }
 
   if (!canJoin) {
@@ -361,6 +361,7 @@ function PublicCallPageClient() {
             onSubmit={joinCall}
             patientName={appointment?.patient_name || "Patient"}
             isJoining={joining || !!tokenData}
+            otherPartyWaiting={appointment?.call_status === "waiting"}
           />
         </div>
       )}
@@ -419,7 +420,7 @@ function PublicCallPageClient() {
   );
 }
 
-function ConsultationEnded() {
+function ConsultationEnded({ duration, doctorName }: { duration?: number; doctorName?: string }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#060B14] px-6">
       <div className="w-full max-w-lg rounded-3xl border border-white/5 bg-white/5 px-8 py-10 text-center shadow-2xl backdrop-blur-xl">
@@ -427,7 +428,26 @@ function ConsultationEnded() {
           <CheckCircle2 className="h-8 w-8 text-emerald-400" />
         </div>
         <p className="mt-6 text-xl font-bold text-white/90">Consultation Ended</p>
-        <p className="mt-2 text-sm leading-relaxed text-white/50">
+        
+        <div className="mt-6 text-sm text-white/70 bg-white/5 rounded-2xl p-6 border border-white/10 text-left space-y-4">
+          <div className="flex justify-between items-center border-b border-white/10 pb-3">
+            <span className="text-white/40 font-medium">Doctor</span>
+            <span className="font-semibold text-white/90">{doctorName ? `Dr. ${doctorName}` : "Your Doctor"}</span>
+          </div>
+          {duration && (
+            <div className="flex justify-between items-center border-b border-white/10 pb-3">
+              <span className="text-white/40 font-medium">Scheduled Duration</span>
+              <span className="font-semibold text-white/90">{duration} min</span>
+            </div>
+          )}
+          <div className="pt-2">
+            <p className="text-white/50 leading-relaxed text-[13px]">
+              Your doctor may share a prescription or notes shortly. You will receive notifications via WhatsApp/email once they are available.
+            </p>
+          </div>
+        </div>
+
+        <p className="mt-8 text-sm leading-relaxed text-white/40">
           The video call has finished. You can now close this tab.
         </p>
       </div>

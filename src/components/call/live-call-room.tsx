@@ -33,11 +33,24 @@ import {
   User,
   WifiOff,
   X,
+  Maximize,
+  Minimize,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 import { notifyError, notifyInfo } from "@/lib/notify";
-import { playIncomingMessageSound } from "@/lib/sound";
+import { playIncomingMessageSound, playPatientWaitingSound } from "@/lib/sound";
 import { mediaManager } from "@/lib/media-manager";
 import { logEvent } from "@/lib/logger";
 import {
@@ -160,12 +173,20 @@ export function LiveCallRoom({
     (remoteQuality === ConnectionQuality.Poor ||
       remoteQuality === ConnectionQuality.Lost);
 
+  const { quality: localQuality } = useConnectionQualityIndicator({
+    participant: localParticipant,
+  });
+  const hasWeakLocalSignal =
+    localQuality === ConnectionQuality.Poor ||
+    localQuality === ConnectionQuality.Lost;
+
   const [activePanel, setActivePanel] = useState<"chat" | "info" | null>(null);
   const [switchingCamera, setSwitchingCamera] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [mobileChromeVisible, setMobileChromeVisible] = useState(true);
   const [callDuration, setCallDuration] = useState("00:00");
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const cameraErrorRef = useRef<Error | undefined>(undefined);
   const micErrorRef = useRef<Error | undefined>(undefined);
@@ -269,9 +290,12 @@ export function LiveCallRoom({
   }, [room]);
 
 
-  // ── 6. Track whether remote ever connected ──
+  // ── 6. Track whether remote ever connected and play sound ──
   useEffect(() => {
     if (remoteParticipants.length > 0) {
+      if (!hasHadRemoteRef.current) {
+        void playPatientWaitingSound();
+      }
       hasHadRemoteRef.current = true;
     }
   }, [remoteParticipants]);
@@ -448,6 +472,30 @@ export function LiveCallRoom({
     }
   }
 
+  async function toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+          setIsFullscreen(false);
+        }
+      }
+    } catch (err) {
+      console.warn("Fullscreen toggle failed:", err);
+    }
+  }
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
   async function toggleMic() {
     try {
       if (mediaManager.audioTrack) {
@@ -548,6 +596,14 @@ export function LiveCallRoom({
                 />
                 {connectionLabel}
               </div>
+
+              {/* Local network quality */}
+              {hasWeakLocalSignal && isConnected && (
+                <div className="hidden items-center gap-1.5 rounded-full bg-amber-500/20 border border-amber-500/30 px-2.5 py-1.5 text-[11px] font-medium text-amber-400 sm:flex" title="Your connection is weak. Try switching to WiFi.">
+                  <WifiOff className="h-3 w-3" />
+                  Weak signal
+                </div>
+              )}
 
               {/* Duration */}
               {callStartedAt ? (
@@ -846,18 +902,48 @@ export function LiveCallRoom({
                 />
               ) : null}
 
+              {/* Fullscreen */}
+              <div className="hidden sm:block">
+                <ControlButton
+                  active={false}
+                  icon={isFullscreen ? Minimize : Maximize}
+                  label="Fullscreen"
+                  onClick={toggleFullscreen}
+                  neutral
+                />
+              </div>
+
               <div className="mx-0.5 hidden h-8 w-px bg-white/[0.08] sm:block" />
 
               {/* Leave */}
-              <button
-                type="button"
-                className="flex h-11 items-center gap-2 rounded-full bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400 active:scale-[0.97] active:bg-red-600 disabled:opacity-60 sm:px-5"
-                onClick={onLeave}
-                disabled={endLoading}
-              >
-                <PhoneOff className="h-4 w-4" />
-                <span className="hidden sm:inline">{endLabel}</span>
-              </button>
+              <Dialog>
+                <DialogTrigger render={
+                  <button
+                    type="button"
+                    className="flex h-11 items-center gap-2 rounded-full bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400 active:scale-[0.97] active:bg-red-600 disabled:opacity-60 sm:px-5"
+                    disabled={endLoading}
+                  />
+                }>
+                  <PhoneOff className="h-4 w-4" />
+                  <span className="hidden sm:inline">{endLabel}</span>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md border-white/10 bg-[#161618] text-white">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl">Are you sure?</DialogTitle>
+                    <DialogDescription className="text-white/60">
+                      This will disconnect both you and the patient from the call. You can view the consultation details later from your dashboard.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end border-none bg-transparent pt-0 px-0 pb-0">
+                    <DialogClose render={<Button variant="outline" className="rounded-xl border-white/10 bg-white/5 text-white hover:bg-white/10 hover:text-white" />}>
+                      Cancel
+                    </DialogClose>
+                    <DialogClose render={<Button onClick={onLeave} className="rounded-xl bg-red-500 text-white hover:bg-red-600" />}>
+                      Yes, end call
+                    </DialogClose>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
         </div>
@@ -1041,6 +1127,14 @@ function ChatPanel({
                 </p>
                 <p className="break-words leading-relaxed">
                   {chatMessage.message}
+                </p>
+                <p
+                  className={cn(
+                    "mt-1 text-[9px] font-medium text-right opacity-60",
+                    isLocal ? "text-white/60" : "text-white/40",
+                  )}
+                >
+                  {new Intl.DateTimeFormat("en-US", { timeStyle: "short" }).format(new Date(chatMessage.timestamp))}
                 </p>
               </div>
             </div>

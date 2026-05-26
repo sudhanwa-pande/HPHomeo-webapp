@@ -454,6 +454,7 @@ function CallRoomContent() {
             onSubmit={joinCall}
             patientName={appointment?.patient?.full_name || "Doctor"}
             isJoining={joining || !!tokenData}
+            otherPartyWaiting={appointment?.call_status === "waiting"}
           />
         </div>
       )}

@@ -258,7 +258,7 @@ function PatientCallContent() {
 
   // Already-ended appointment logic (Bug 3 Fix)
   if (appointment.call_status === "ended" || callEnded) {
-    return <ConsultationEnded appointmentId={appointmentId} duration={appointment.duration_min} />;
+    return <ConsultationEnded appointmentId={appointmentId} duration={appointment.duration_min} doctorName={appointment.doctor?.full_name || appointment.doctor_name || undefined} />;
   }
 
   if (!canJoin) {
@@ -308,6 +308,7 @@ function PatientCallContent() {
             onSubmit={joinCall}
             patientName={appointment?.patient_name || "Patient"}
             isJoining={joining || !!tokenData}
+            otherPartyWaiting={appointment?.call_status === "waiting"}
           />
         </div>
       )}
@@ -362,7 +363,7 @@ function PatientCallContent() {
   );
 }
 
-function ConsultationEnded({ appointmentId, duration }: { appointmentId: string; duration?: number }) {
+function ConsultationEnded({ appointmentId, duration, doctorName }: { appointmentId: string; duration?: number; doctorName?: string }) {
   const router = useRouter();
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-bg px-6">
@@ -371,14 +372,30 @@ function ConsultationEnded({ appointmentId, duration }: { appointmentId: string;
           <CheckCircle2 className="h-8 w-8 text-emerald-600" />
         </div>
         <p className="mt-6 text-xl font-bold text-gray-900">Consultation Ended</p>
-        <p className="mt-2 text-sm leading-relaxed text-gray-500">
-          The video call has finished. Thank you for using eHomeo.
-        </p>
+        
+        <div className="mt-6 text-sm text-gray-700 bg-gray-50 rounded-2xl p-6 border border-gray-100 text-left space-y-4">
+          <div className="flex justify-between items-center border-b border-gray-200/60 pb-3">
+            <span className="text-gray-500 font-medium">Doctor</span>
+            <span className="font-semibold text-gray-900">{doctorName ? `Dr. ${doctorName}` : "Your Doctor"}</span>
+          </div>
+          {duration && (
+            <div className="flex justify-between items-center border-b border-gray-200/60 pb-3">
+              <span className="text-gray-500 font-medium">Scheduled Duration</span>
+              <span className="font-semibold text-gray-900">{duration} min</span>
+            </div>
+          )}
+          <div className="pt-2">
+            <p className="text-gray-600 leading-relaxed text-[13px]">
+              Your doctor may share a prescription or notes shortly. You will receive notifications via WhatsApp/email once they are available.
+            </p>
+          </div>
+        </div>
+
         <div className="mt-8 flex flex-col gap-3">
-          <Button className="rounded-xl" onClick={() => router.push(`/patient/appointments/${appointmentId}`)}>
-            Return to Appointment
+          <Button className="rounded-xl h-12 text-[15px] font-semibold shadow-sm" onClick={() => router.push(`/patient/appointments/${appointmentId}`)}>
+            View Appointment Details
           </Button>
-          <Button variant="outline" className="rounded-xl" onClick={() => router.push("/patient/dashboard")}>
+          <Button variant="outline" className="rounded-xl h-12 text-[15px] font-semibold border-gray-200 text-gray-700 hover:bg-gray-50" onClick={() => router.push("/patient/dashboard")}>
             Go to Dashboard
           </Button>
         </div>
