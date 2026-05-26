@@ -255,6 +255,8 @@ export function LiveCallRoom({
       } catch {
         // room may already be disconnected
       }
+      // Release MediaManager singleton tracks so the next call starts fresh
+      mediaManager.cleanup();
       // Belt-and-suspenders: stop any lingering hardware tracks
       document.querySelectorAll("video, audio").forEach((el) => {
         const media = el as HTMLMediaElement;
