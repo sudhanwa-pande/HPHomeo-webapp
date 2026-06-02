@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * useWakeLock
@@ -8,13 +8,9 @@ import { useEffect, useRef, useState } from "react";
  * Prevents the device screen from sleeping during a call.
  * Essential for mobile devices where the user might just be listening.
  */
-export function useWakeLock() {
-  const [isSupported, setIsSupported] = useState(false);
+export function useWakeLock(enabled = true) {
+  const isSupported = typeof window !== "undefined" && "wakeLock" in navigator;
   const wakeLockRef = useRef<any>(null);
-
-  useEffect(() => {
-    setIsSupported("wakeLock" in navigator);
-  }, []);
 
   useEffect(() => {
     if (!isSupported) return;
@@ -42,23 +38,27 @@ export function useWakeLock() {
       }
     };
 
-    // Request wake lock initially
-    requestWakeLock();
+    if (enabled) {
+      // Request wake lock initially
+      requestWakeLock();
 
-    // Re-request wake lock when visibility changes (if app comes back from background)
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        requestWakeLock();
-      }
-    };
+      // Re-request wake lock when visibility changes (if app comes back from background)
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === "visible") {
+          requestWakeLock();
+        }
+      };
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
 
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      return () => {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+        releaseWakeLock();
+      };
+    } else {
       releaseWakeLock();
-    };
-  }, [isSupported]);
+    }
+  }, [isSupported, enabled]);
 
   return { isSupported };
 }

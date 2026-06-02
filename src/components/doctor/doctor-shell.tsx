@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type ReactNode } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import { Calendar, ChevronsUpDown, ClipboardList, Clock, LayoutDashboard, LogOut, Settings, Shield, Users, Wifi, WifiOff } from "lucide-react";
@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/doctor/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -58,6 +59,26 @@ interface DoctorShellProps {
 export function DoctorShell({ children, title, subtitle, headerRight }: DoctorShellProps) {
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !headerRef.current) return;
+    const header = headerRef.current;
+    const updateHeight = () => {
+      const height = header.offsetHeight;
+      document.documentElement.style.setProperty("--doctor-header-height", `${height}px`);
+    };
+    updateHeight();
+
+    if (window.ResizeObserver) {
+      const observer = new ResizeObserver(updateHeight);
+      observer.observe(header);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateHeight);
+    return () => window.removeEventListener("resize", updateHeight);
+  }, []);
 
   // Global SSE stream — pushes real-time events to all doctor pages
   const { connectionState: sseState } = useEventStream({
@@ -141,7 +162,7 @@ export function DoctorShell({ children, title, subtitle, headerRight }: DoctorSh
     >
       <DoctorSidebar />
       <SidebarInset className="bg-brand-bg">
-        <header className="sticky top-0 z-30 flex min-h-[64px] flex-col gap-2 border-b border-border/30 bg-white/88 px-4 py-2.5 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-6">
+        <header ref={headerRef} className="sticky top-0 z-30 flex min-h-[64px] flex-col gap-2 border-b border-border/30 bg-white/88 px-4 py-2.5 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-6">
           <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
             <SidebarTrigger className="-ml-1 text-brand-subtext hover:text-brand-dark" />
             <div className="h-5 w-px bg-border/40" />
@@ -375,6 +396,3 @@ function SSEIndicator({ state }: { state: "connecting" | "connected" | "disconne
   );
 }
 
-function cn(...classes: (string | false | null | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
-}

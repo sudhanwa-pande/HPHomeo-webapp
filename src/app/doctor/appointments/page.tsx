@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef, ColumnFiltersState } from "@tanstack/react-table";
@@ -42,7 +42,7 @@ import {
 
 import api from "@/lib/api";
 import { notifyApiError, notifySuccess } from "@/lib/notify";
-import { cn } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 import { AuthGuard } from "@/components/auth-guard";
 import { DoctorShell } from "@/components/doctor/doctor-shell";
 import { DataTable, PageHeader, StatusBadge } from "@/components/doctor/ui";
@@ -57,7 +57,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { DoctorAppointment } from "@/types/doctor";
-import { useIsMobile } from "@/hooks/use-mobile";
+
 
 /* ─── helpers ───────────────────────────────────────────────────── */
 
@@ -149,18 +149,30 @@ export default function AppointmentsPage() {
   );
 }
 
+function useNow(intervalMs = 60000) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
 /* ─── main content ──────────────────────────────────────────────── */
 
 function AppointmentsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const isMobile = useIsMobile();
 
   const [activeTab, setActiveTab] = useState<TabKey>("today");
   const [viewMode, setViewMode] = useState<"table" | "cards">("cards");
   const [searchQuery, setSearchQuery] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const focusId = searchParams.get("focus");
 
@@ -177,21 +189,7 @@ function AppointmentsContent() {
       );
       return data.appointments;
     },
-    staleTime: 0,
-  });
-
-  const completeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.post(`/doctor/appointments/${id}/complete`);
-    },
-    onError: (err) => notifyApiError(err, "Couldn't complete appointment"),
-  });
-
-  const noShowMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.put(`/doctor/appointments/${id}/no-show`);
-    },
-    onError: (err) => notifyApiError(err, "Couldn't mark no-show"),
+    staleTime: 30_000,
   });
 
   const refreshData = useCallback(async () => {
@@ -200,6 +198,63 @@ function AppointmentsContent() {
       queryClient.invalidateQueries({ queryKey: ["doctor-stats"] }),
     ]);
   }, [queryClient, fromStr, toStr]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let startY = 0;
+    let isTracking = false;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (window.scrollY === 0) {
+        startY = e.touches[0].clientY;
+        isTracking = true;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isTracking) return;
+      const currentY = e.touches[0].clientY;
+      const diffY = currentY - startY;
+
+      if (diffY > 0) {
+        if (e.cancelable) {
+          e.preventDefault();
+        }
+        const dist = Math.min(diffY * 0.4, 80);
+        setPullDistance(dist);
+      } else {
+        isTracking = false;
+        setPullDistance(0);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      if (!isTracking) return;
+      isTracking = false;
+
+      if (pullDistance > 50) {
+        setIsRefreshing(true);
+        refreshData().finally(() => {
+          setIsRefreshing(false);
+          setPullDistance(0);
+        });
+      } else {
+        setPullDistance(0);
+      }
+    };
+
+    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchmove", handleTouchMove, { passive: false });
+    container.addEventListener("touchend", handleTouchEnd, { passive: true });
+
+    return () => {
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [pullDistance, refreshData]);
 
   // Sort all appointments by time
   const sorted = useMemo(() => {
@@ -210,7 +265,7 @@ function AppointmentsContent() {
   }, [appointments]);
 
   // Tab filtering
-  const now = new Date();
+  const now = useNow(60000);
   const tabFiltered = useMemo(() => {
     switch (activeTab) {
       case "today":
@@ -234,8 +289,7 @@ function AppointmentsContent() {
       default:
         return sorted;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, sorted]);
+  }, [activeTab, sorted, now]);
 
   // Quick filters
   const quickFiltered = useMemo(() => {
@@ -275,16 +329,22 @@ function AppointmentsContent() {
     ).length;
     const noShows = todayAll.filter((a) => a.status === "no_show").length;
     return { total, completed, upcoming, noShows };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayAll]);
+  }, [todayAll, now]);
 
   // "Up Next" appointment — the closest confirmed appointment in the future
   const upNext = useMemo(() => {
     const todayConfirmed = todayAll
       .filter((a) => a.status === "confirmed")
       .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
-    return todayConfirmed.find((a) => isAfter(parseISO(a.scheduled_at), new Date())) ?? todayConfirmed[0] ?? null;
-  }, [todayAll]);
+    return todayConfirmed.find((a) => isAfter(parseISO(a.scheduled_at), now)) ?? todayConfirmed[0] ?? null;
+  }, [todayAll, now]);
+
+  const minutesDiff = useMemo(() => {
+    if (!upNext) return 0;
+    return Math.round(
+      (parseISO(upNext.scheduled_at).getTime() - now.getTime()) / 60000
+    );
+  }, [upNext, now]);
 
   // Group today's appointments by time period for agenda view
   const todayGrouped = useMemo(() => {
@@ -306,9 +366,9 @@ function AppointmentsContent() {
   }, [filtered, activeTab]);
 
   // Navigate to detail page
-  const openDetail = (id: string) => {
+  const openDetail = useCallback((id: string) => {
     router.push(`/doctor/appointments/${id}`);
-  };
+  }, [router]);
 
   /* ─── table columns (for table view) ──────────────────────────── */
   const columns: ColumnDef<DoctorAppointment>[] = useMemo(() => [
@@ -317,13 +377,7 @@ function AppointmentsContent() {
       header: "Patient",
       cell: ({ row }) => {
         const a = row.original;
-        const initials =
-          a.patient.full_name
-            ?.split(" ")
-            .slice(0, 2)
-            .map((n) => n[0])
-            .join("")
-            .toUpperCase() || "P";
+        const initials = getInitials(a.patient.full_name);
         return (
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand/20 to-brand/5 text-[11px] font-bold text-brand">
@@ -446,12 +500,35 @@ function AppointmentsContent() {
         );
       },
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], []);
+  ], [router, openDetail]);
 
   return (
-    <DoctorShell title="Appointments" subtitle={format(new Date(), "EEEE, dd MMMM")}>
-      <div className="page-stack space-y-6">
+    <DoctorShell title="Appointments" subtitle={format(now, "EEEE, dd MMMM")}>
+      <div ref={containerRef} className="page-stack space-y-6">
+        {/* Pull to refresh indicator */}
+        {(pullDistance > 0 || isRefreshing) && (
+          <div 
+            style={{ 
+              height: isRefreshing ? 50 : pullDistance, 
+              opacity: isRefreshing ? 1 : Math.min(pullDistance / 50, 1),
+              marginBottom: isRefreshing || pullDistance > 0 ? 12 : 0
+            }}
+            className="flex items-center justify-center overflow-hidden transition-all duration-150"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md border border-border/40">
+              {isRefreshing ? (
+                <Loader2 className="h-4 w-4 animate-spin text-brand" />
+              ) : (
+                <motion.div
+                  animate={{ rotate: pullDistance * 4 }}
+                  transition={{ type: "tween", duration: 0 }}
+                >
+                  <ArrowRight className="h-4 w-4 rotate-90 text-brand-subtext" />
+                </motion.div>
+              )}
+            </div>
+          </div>
+        )}
         {/* ─── Stat cards ─────────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard
@@ -523,20 +600,33 @@ function AppointmentsContent() {
             <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div className="flex min-w-0 items-center gap-3 sm:gap-4">
                 <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand/10 text-sm font-bold text-brand sm:flex">
-                  {upNext.patient.full_name
-                    ?.split(" ")
-                    .slice(0, 2)
-                    .map((n) => n[0])
-                    .join("")
-                    .toUpperCase() || "P"}
+                  {getInitials(upNext.patient.full_name)}
                 </div>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand">
                       Up Next
                     </span>
                     <span className="text-xs text-brand-subtext">
                       {format(parseISO(upNext.scheduled_at), "hh:mm a")}
+                    </span>
+                    {/* Live countdown timer */}
+                    <span className={cn(
+                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all duration-300",
+                      minutesDiff > 0 && minutesDiff <= 15
+                        ? "bg-amber-100 text-amber-700 animate-pulse"
+                        : minutesDiff <= 0
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-brand-bg text-brand-subtext"
+                    )}>
+                      <Clock className="h-2.5 w-2.5" />
+                      {minutesDiff > 0 ? (
+                        minutesDiff < 60 ? `in ${minutesDiff}m` : `in ${Math.floor(minutesDiff / 60)}h ${minutesDiff % 60}m`
+                      ) : (
+                        Math.abs(minutesDiff) < (upNext.duration_min || 15)
+                          ? `started ${Math.abs(minutesDiff)}m ago`
+                          : `overdue by ${Math.abs(minutesDiff)}m`
+                      )}
                     </span>
                   </div>
                   <p className="mt-1 truncate text-base font-semibold text-brand-dark">
@@ -585,13 +675,21 @@ function AppointmentsContent() {
         <div className="space-y-4">
           {/* Tab bar */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="inline-flex items-center rounded-2xl border border-border/60 bg-white p-1">
+            <div 
+              role="tablist"
+              aria-label="Appointment categories"
+              className="inline-flex max-w-full items-center overflow-x-auto scrollbar-hide rounded-2xl border border-border/60 bg-white p-1"
+            >
               {TABS.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.key;
                 return (
                   <button
                     key={tab.key}
+                    id={`tab-${tab.key}`}
+                    role="tab"
+                    aria-selected={isActive}
+                    aria-controls={`tabpanel-${tab.key}`}
                     type="button"
                     onClick={() => {
                       setActiveTab(tab.key);
@@ -599,7 +697,7 @@ function AppointmentsContent() {
                       setSearchQuery("");
                     }}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-all",
+                      "flex shrink-0 items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-all",
                       isActive
                         ? "bg-brand/10 text-brand shadow-sm"
                         : "text-brand-subtext hover:text-brand-dark",
@@ -625,7 +723,7 @@ function AppointmentsContent() {
             </div>
 
             {/* View toggle */}
-            <div className="inline-flex items-center rounded-xl border border-border/60 bg-white p-0.5">
+            <div className="hidden sm:inline-flex items-center rounded-xl border border-border/60 bg-white p-0.5">
               <button
                 type="button"
                 onClick={() => setViewMode("cards")}
@@ -655,150 +753,167 @@ function AppointmentsContent() {
             </div>
           </div>
 
-          {/* Search + Quick filters */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative max-w-xs flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-subtext/60" />
-              <Input
-                placeholder="Search by name or phone..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="rounded-xl pl-9"
-              />
+          {/* Search + Quick filters - Hidden in table view mode per user request */}
+          {viewMode === "cards" && (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative max-w-xs flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-subtext/60" />
+                <Input
+                  placeholder="Search by name or phone..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="rounded-xl pl-9"
+                  aria-label="Search appointments"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Filter className="h-3.5 w-3.5 text-brand-subtext/60" />
+                {QUICK_FILTERS.map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setQuickFilter(f.key)}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs font-medium transition-all",
+                      quickFilter === f.key
+                        ? "border-brand/30 bg-brand/10 text-brand"
+                        : "border-border/60 bg-white text-brand-subtext hover:border-brand/20 hover:text-brand-dark",
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Filter className="h-3.5 w-3.5 text-brand-subtext/60" />
-              {QUICK_FILTERS.map((f) => (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => setQuickFilter(f.key)}
-                  className={cn(
-                    "rounded-full border px-3 py-1 text-xs font-medium transition-all",
-                    quickFilter === f.key
-                      ? "border-brand/30 bg-brand/10 text-brand"
-                      : "border-border/60 bg-white text-brand-subtext hover:border-brand/20 hover:text-brand-dark",
-                  )}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
         </div>
 
         {/* ─── Content area ──────────────────────────────────── */}
-        {viewMode === "cards" ? (
-          <div className="space-y-6">
-            {isLoading ? (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <AgendaCardSkeleton key={i} />
-                ))}
-              </div>
-            ) : filtered.length === 0 ? (
-              <EmptyState tab={activeTab} />
-            ) : activeTab === "today" && todayGrouped.length > 0 ? (
-              // Grouped agenda view for Today
-              todayGrouped.map((group) => (
-                <div key={group.label}>
-                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-brand-subtext/70">
-                    {group.label}
-                  </h3>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    <AnimatePresence mode="popLayout">
-                      {group.items.map((apt, i) => (
-                        <AgendaCard
-                          key={apt.appointment_id}
-                          appointment={apt}
-                          isUpNext={upNext?.appointment_id === apt.appointment_id}
-                          onClick={() => openDetail(apt.appointment_id)}
-                          onJoinCall={() => router.push(`/doctor/call/${apt.appointment_id}`)}
-                          index={i}
-                        />
-                      ))}
-                    </AnimatePresence>
-                  </div>
-                </div>
-              ))
-            ) : (
-              // Flat grid for other tabs
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <AnimatePresence mode="popLayout">
-                  {filtered.map((apt, i) => (
-                    <AgendaCard
-                      key={apt.appointment_id}
-                      appointment={apt}
-                      isUpNext={false}
-                      onClick={() => openDetail(apt.appointment_id)}
-                      onJoinCall={() => router.push(`/doctor/call/${apt.appointment_id}`)}
-                      index={i}
-                    />
+        <AnimatePresence mode="wait">
+          <motion.div 
+            key={`${activeTab}-${viewMode}`}
+            role="tabpanel"
+            id={`tabpanel-${activeTab}`}
+            aria-labelledby={`tab-${activeTab}`}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-6"
+          >
+          {viewMode === "cards" ? (
+            <div className="space-y-6">
+              {isLoading ? (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <AgendaCardSkeleton key={i} />
                   ))}
-                </AnimatePresence>
-              </div>
-            )}
-          </div>
-        ) : (
-          <DataTable
-            columns={columns}
-            data={filtered}
-            loading={isLoading}
-            className="rounded-[30px]"
-            emptyIcon={Calendar}
-            emptyTitle={`No ${activeTab} appointments`}
-            emptyDescription={getEmptyMessage(activeTab)}
-            storageKey="doctor-appointments-table"
-            searchPlaceholder="Search patient, mode, or schedule"
-            savedViews={[
-              { id: "all", label: "All" },
-              {
-                id: "confirmed",
-                label: "Confirmed",
-                columnFilters: [{ id: "status", value: "confirmed" }] as ColumnFiltersState,
-              },
-              {
-                id: "finalized",
-                label: "Rx Finalized",
-                columnFilters: [{ id: "prescription_status", value: "final" }] as ColumnFiltersState,
-              },
-            ]}
-            filterOptions={[
-              {
-                id: "status",
-                label: "Status",
-                options: [
-                  { label: "Confirmed", value: "confirmed" },
-                  { label: "Completed", value: "completed" },
-                  { label: "Cancelled", value: "cancelled" },
-                  { label: "No show", value: "no_show" },
-                ],
-              },
-              {
-                id: "mode",
-                label: "Mode",
-                options: [
-                  { label: "Online", value: "online" },
-                  { label: "Walk-in", value: "walk_in" },
-                ],
-              },
-              {
-                id: "prescription_status",
-                label: "Rx",
-                options: [
-                  { label: "None", value: "none" },
-                  { label: "Draft", value: "draft" },
-                  { label: "Finalized", value: "final" },
-                ],
-              },
-            ]}
-            density="comfortable"
-            rowSurface="card"
-            cellClassName={(row) =>
-              focusId === row.appointment_id ? "bg-brand/5 border-brand/20" : undefined
-            }
-          />
-        )}
+                </div>
+              ) : filtered.length === 0 ? (
+                <EmptyState tab={activeTab} />
+              ) : activeTab === "today" && todayGrouped.length > 0 ? (
+                // Grouped agenda view for Today
+                todayGrouped.map((group) => (
+                  <div key={group.label}>
+                    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-brand-subtext/70">
+                      {group.label}
+                    </h3>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      <AnimatePresence mode="popLayout">
+                        {group.items.map((apt, i) => (
+                          <AgendaCard
+                            key={apt.appointment_id}
+                            appointment={apt}
+                            isUpNext={upNext?.appointment_id === apt.appointment_id}
+                            onClick={() => openDetail(apt.appointment_id)}
+                            onJoinCall={() => router.push(`/doctor/call/${apt.appointment_id}`)}
+                            index={i}
+                          />
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                // Flat grid for other tabs
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <AnimatePresence mode="popLayout">
+                    {filtered.map((apt, i) => (
+                      <AgendaCard
+                        key={apt.appointment_id}
+                        appointment={apt}
+                        isUpNext={false}
+                        onClick={() => openDetail(apt.appointment_id)}
+                        onJoinCall={() => router.push(`/doctor/call/${apt.appointment_id}`)}
+                        index={i}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
+          ) : (
+            <DataTable
+              columns={columns}
+              data={tabFiltered}
+              loading={isLoading}
+              className="rounded-[30px]"
+              emptyIcon={Calendar}
+              emptyTitle={`No ${activeTab} appointments`}
+              emptyDescription={getEmptyMessage(activeTab)}
+              storageKey="doctor-appointments-table"
+              searchPlaceholder="Search patient, mode, or schedule"
+              savedViews={[
+                { id: "all", label: "All" },
+                {
+                  id: "confirmed",
+                  label: "Confirmed",
+                  columnFilters: [{ id: "status", value: "confirmed" }] as ColumnFiltersState,
+                },
+                {
+                  id: "finalized",
+                  label: "Rx Finalized",
+                  columnFilters: [{ id: "prescription_status", value: "final" }] as ColumnFiltersState,
+                },
+              ]}
+              filterOptions={[
+                {
+                  id: "status",
+                  label: "Status",
+                  options: [
+                    { label: "Confirmed", value: "confirmed" },
+                    { label: "Completed", value: "completed" },
+                    { label: "Cancelled", value: "cancelled" },
+                    { label: "No show", value: "no_show" },
+                  ],
+                },
+                {
+                  id: "mode",
+                  label: "Mode",
+                  options: [
+                    { label: "Online", value: "online" },
+                    { label: "Walk-in", value: "walk_in" },
+                  ],
+                },
+                {
+                  id: "prescription_status",
+                  label: "Rx",
+                  options: [
+                    { label: "None", value: "none" },
+                    { label: "Draft", value: "draft" },
+                    { label: "Finalized", value: "final" },
+                  ],
+                },
+              ]}
+              density="comfortable"
+              rowSurface="card"
+              cellClassName={(row) =>
+                focusId === row.appointment_id ? "bg-brand/5 border-brand/20" : undefined
+              }
+            />
+          )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </DoctorShell>
   );
@@ -877,13 +992,7 @@ function AgendaCard({
   onJoinCall: () => void;
   index: number;
 }) {
-  const initials =
-    apt.patient.full_name
-      ?.split(" ")
-      .slice(0, 2)
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase() || "P";
+  const initials = getInitials(apt.patient.full_name);
 
   const time = format(parseISO(apt.scheduled_at), "hh:mm a");
   const isWaiting =
@@ -899,6 +1008,14 @@ function AgendaCard({
       transition={{ duration: 0.2, delay: index * 0.03 }}
       whileHover={{ y: -2 }}
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={cn(
         "group relative cursor-pointer overflow-hidden rounded-2xl border bg-white transition-all duration-200 hover:shadow-[0_12px_40px_rgba(15,23,42,0.08)]",
         isUpNext
@@ -1003,8 +1120,8 @@ function AgendaCard({
           </div>
         </div>
 
-        {/* Hover action buttons */}
-        <div className="mt-3 flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+        {/* Action buttons - always visible on mobile/touch, hover-triggered on desktop */}
+        <div className="mt-3 flex items-center gap-2 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
           {isWaiting && (
             <Button
               size="sm"

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
+import isEqual from "fast-deep-equal";
 import {
   CalendarDays,
   Check,
@@ -328,7 +329,7 @@ export function AppointmentConsultationDialog({
   const canManagePrescription = ["confirmed", "completed"].includes(currentAppointment.status);
   const hasUnsavedChanges =
     !isFinalized &&
-    JSON.stringify(toComparablePayload(payload)) !== JSON.stringify(toComparablePayload(baseline));
+    !isEqual(toComparablePayload(payload), toComparablePayload(baseline));
   const preparedPayload = useMemo(() => preparePayloadForApi(payload), [payload]);
 
   const saveDraftMutation = useMutation({

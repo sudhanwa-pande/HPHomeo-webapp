@@ -63,6 +63,31 @@ interface VerificationState {
   expiresAt: number;
 }
 
+function setObfuscatedVerificationState(key: string, state: VerificationState) {
+  try {
+    const rawString = JSON.stringify(state);
+    const obfuscated = btoa(unescape(encodeURIComponent(rawString)));
+    localStorage.setItem(key, obfuscated);
+  } catch (err) {
+    console.error("Failed to store verification state:", err);
+  }
+}
+
+function getObfuscatedVerificationState(key: string): VerificationState | null {
+  try {
+    const stored = localStorage.getItem(key);
+    if (!stored) return null;
+    if (stored.startsWith("{")) {
+      return JSON.parse(stored);
+    }
+    const decoded = decodeURIComponent(escape(atob(stored)));
+    return JSON.parse(decoded);
+  } catch (err) {
+    console.error("Failed to retrieve verification state:", err);
+    return null;
+  }
+}
+
 /* ─── Helpers ─── */
 
 function toDateString(date: Date): string {
@@ -211,10 +236,9 @@ export default function BookDoctorPage() {
   useEffect(() => {
     const restoreVerification = async () => {
       try {
-        const stored = localStorage.getItem(VERIFICATION_KEY);
-        if (!stored) return;
+        const parsed = getObfuscatedVerificationState(VERIFICATION_KEY);
+        if (!parsed) return;
 
-        const parsed: VerificationState = JSON.parse(stored);
         if (parsed.version !== 1) return;
 
         if (Date.now() > parsed.expiresAt) {
@@ -494,13 +518,13 @@ export default function BookDoctorPage() {
 
               setBookingSuccess(data);
               setVerificationStatus("verifying");
-              localStorage.setItem(VERIFICATION_KEY, JSON.stringify({
+              setObfuscatedVerificationState(VERIFICATION_KEY, {
                 version: 1,
                 appointmentId: data.appointment_id,
                 bookingData: data,
                 startedAt: Date.now(),
                 expiresAt: Date.now() + 5 * 60 * 1000
-              }));
+              });
             },
             onDismiss: () => {
               console.log("Razorpay checkout dismissed.");
@@ -593,13 +617,13 @@ export default function BookDoctorPage() {
 
           setVerificationStatus("verifying");
           if (bookingSuccess) {
-            localStorage.setItem(VERIFICATION_KEY, JSON.stringify({
+            setObfuscatedVerificationState(VERIFICATION_KEY, {
               version: 1,
               appointmentId: bookingSuccess.appointment_id,
               bookingData: bookingSuccess,
               startedAt: Date.now(),
               expiresAt: Date.now() + 5 * 60 * 1000
-            }));
+            });
           }
         },
         onDismiss: () => {

@@ -25,6 +25,7 @@ import {
   MicOff,
   Phone,
   PhoneOff,
+  RefreshCw,
   Send,
   User,
 } from "lucide-react";
@@ -49,6 +50,14 @@ import { ConnectionObserver } from "@/components/call/connection-observer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { DoctorAppointmentDetail, VideoTokenResponse } from "@/types/doctor";
 
 type MediaPreferences = {
@@ -69,6 +78,13 @@ function formatConnectionLabel(connectionState: ConnectionState, remoteCount: nu
   return "Offline";
 }
 
+interface Bounds {
+  top: number;
+  left: number;
+  right: number;
+  bottom: number;
+}
+
 /* ─── Main component ────────────────────────────────────────────── */
 
 export function ConsultationCallPanel({
@@ -83,8 +99,9 @@ export function ConsultationCallPanel({
   onMaximize?: () => void;
 }) {
   const queryClient = useQueryClient();
-  useWakeLock();
+  const panelRef = useRef<HTMLDivElement>(null);
   const [tokenData, setTokenData] = useState<VideoTokenResponse | null>(null);
+  useWakeLock(!!tokenData);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [callEnded, setCallEnded] = useState(false);
@@ -96,14 +113,17 @@ export function ConsultationCallPanel({
 
   // Safety net: stop all camera/mic tracks when this panel unmounts
   useEffect(() => {
+    const currentPanel = panelRef.current;
     return () => {
-      document.querySelectorAll("video, audio").forEach((el) => {
-        const media = el as HTMLMediaElement;
-        if (media.srcObject instanceof MediaStream) {
-          media.srcObject.getTracks().forEach((t) => t.stop());
-          media.srcObject = null;
-        }
-      });
+      if (currentPanel) {
+        currentPanel.querySelectorAll("video, audio").forEach((el) => {
+          const media = el as HTMLMediaElement;
+          if (media.srcObject instanceof MediaStream) {
+            media.srcObject.getTracks().forEach((t) => t.stop());
+            media.srcObject = null;
+          }
+        });
+      }
     };
   }, []);
 
@@ -112,7 +132,7 @@ export function ConsultationCallPanel({
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isPeeking, setIsPeeking] = useState(false);
-  const [bounds, setBounds] = useState({ top: 0, left: 0, right: 0, bottom: 0 });
+  const [bounds, setBounds] = useState<Bounds | null>(null);
   
   const peekTimerRef = useRef<NodeJS.Timeout | null>(null);
   const peekStartedAtRef = useRef<number>(0);
@@ -156,7 +176,7 @@ export function ConsultationCallPanel({
       // Bulletproof background race prevention
       if (Date.now() - peekStartedAtRef.current >= 2400) {
         setIsPeeking(false);
-        setBounds(calculateBounds(140)); // Sync bounds atomically
+        setBounds(calculateBounds(160)); // Sync bounds atomically
         if (interactionState.current === "peeking") {
           interactionState.current = "idle";
         }
@@ -234,7 +254,7 @@ export function ConsultationCallPanel({
         // 1. Update bounds FIRST (atomically batched with state updates)
         // 2. Framer motion applies dragConstraints 
         // 3. Animation begins to new x/y safely without jumps
-        const nextPipWidth = willBePeeking ? 200 : keyboardOpen ? 140 : 180;
+        const nextPipWidth = willBePeeking ? 200 : keyboardOpen ? 160 : 180;
         setBounds(calculateBounds(nextPipWidth));
       }, 200); // 200ms debounce prevents jitter during Android keyboard animation
     };
@@ -252,7 +272,7 @@ export function ConsultationCallPanel({
   }, [minimized, isPeeking, calculateBounds]);
 
   // Dimensions
-  const pipWidth = isPeeking ? 200 : isKeyboardOpen ? 140 : 180;
+  const pipWidth = isPeeking ? 200 : isKeyboardOpen ? 160 : 180;
 
   /* ── Call logic ── */
   const canStartConsultation =
@@ -334,13 +354,12 @@ export function ConsultationCallPanel({
     // Don't show "connection dropped" if the call was intentionally ended
     if (callEndedRef.current) return;
     setJoinError("Connection dropped. Rejoin the consultation to continue.");
-    setTokenData(null);
   };
 
   if (!canStartConsultation) {
     if (minimized) return null;
     return (
-      <section className="rounded-2xl border border-gray-200/60 bg-white p-5">
+      <section ref={panelRef} className="rounded-2xl border border-gray-200/60 bg-white p-5">
         <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
         <p className="mt-1.5 text-sm leading-relaxed text-gray-500">
           Video consultation is available only for confirmed online appointments.
@@ -354,7 +373,7 @@ export function ConsultationCallPanel({
   if (minimized && !tokenData) {
     if (callEnded) return null;
     return (
-      <div className="fixed bottom-24 right-4 z-[999] sm:bottom-6 sm:right-6">
+      <div ref={panelRef} className="fixed bottom-24 right-4 z-[999] sm:bottom-6 sm:right-6">
         <button
           type="button"
           onClick={() => {
@@ -383,21 +402,22 @@ export function ConsultationCallPanel({
   // Active call — layout adapts via `minimized`
   if (tokenData) {
     return (
-      <LiveKitRoom
-        key={appointmentId}
-        serverUrl={tokenData.server_url}
-        token={tokenData.token}
-        connect
-        audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
-        video={buildPreferredVideoConstraints(mediaPreferences.video)}
-        options={LIVEKIT_ROOM_OPTIONS}
-        onMediaDeviceFailure={handleMediaDeviceFailure}
-        onDisconnected={handleDisconnected}
-        style={{ display: "contents" }}
-      >
-        <ConnectionObserver />
-        {!minimized ? (
-          <div className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white transition-all duration-300">
+      <div ref={panelRef} style={{ display: "contents" }}>
+        <LiveKitRoom
+          key={appointmentId}
+          serverUrl={tokenData.server_url}
+          token={tokenData.token}
+          connect
+          audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
+          video={buildPreferredVideoConstraints(mediaPreferences.video)}
+          options={LIVEKIT_ROOM_OPTIONS}
+          onMediaDeviceFailure={handleMediaDeviceFailure}
+          onDisconnected={handleDisconnected}
+          style={{ display: "contents" }}
+        >
+          <ConnectionObserver />
+          {!minimized ? (
+            <div className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white transition-all duration-300">
             <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
               <div>
                 <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
@@ -414,6 +434,8 @@ export function ConsultationCallPanel({
               endLoading={endCallMutation.isPending}
               onEnd={() => endCallMutation.mutate()}
               onMaximize={onMaximize}
+              onReconnect={() => void joinCall()}
+              joining={joining}
             />
           </div>
         ) : (
@@ -425,7 +447,7 @@ export function ConsultationCallPanel({
             dragListener={false}
             dragMomentum={false}
             dragElastic={0.05}
-            dragConstraints={bounds}
+            dragConstraints={bounds || undefined}
             onDragStart={() => {
               if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
               setIsPeeking(false);
@@ -449,10 +471,10 @@ export function ConsultationCallPanel({
               width: pipWidth,
               opacity: isKeyboardOpen && !isPeeking ? 0.85 : 1,
               x: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
-                   ? bounds.right 
+                   ? (bounds?.right ?? undefined)
                    : undefined,
               y: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
-                   ? bounds.top 
+                   ? (bounds?.top ?? undefined)
                    : undefined,
               scale: isDragging ? 1.02 : 1,
             }}
@@ -473,11 +495,14 @@ export function ConsultationCallPanel({
             style={{
               top: 0,
               left: 0,
-              x: bounds.right || (typeof window !== 'undefined' ? window.innerWidth - pipWidth - 16 : 0),
-              y: bounds.top || (typeof window !== 'undefined' && window.innerHeight > window.innerWidth ? 48 : 16),
+              x: bounds?.right ?? (typeof window !== 'undefined' ? window.innerWidth - pipWidth - 16 : 0),
+              y: bounds?.top ?? (typeof window !== 'undefined' && window.innerHeight > window.innerWidth ? 48 : 16),
             }}
           >
             <div
+              role="slider"
+              aria-label="Drag to reposition video"
+              aria-valuenow={0}
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -509,16 +534,19 @@ export function ConsultationCallPanel({
               endLoading={endCallMutation.isPending}
               onEnd={() => endCallMutation.mutate()}
               onMaximize={onMaximize}
+              onReconnect={() => void joinCall()}
+              joining={joining}
             />
           </motion.div>
         )}
       </LiveKitRoom>
+      </div>
     );
   }
 
   // Pre-join UI — full-size only (minimized + no tokenData returns null above)
   return (
-    <section className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white">
+    <section ref={panelRef} className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white">
       <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
         <div>
           <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
@@ -651,6 +679,8 @@ function CallRoomContent({
   endLoading,
   onEnd,
   onMaximize,
+  onReconnect,
+  joining,
 }: {
   minimized: boolean;
   patientName: string;
@@ -658,6 +688,8 @@ function CallRoomContent({
   endLoading: boolean;
   onEnd: () => void;
   onMaximize?: () => void;
+  onReconnect?: () => void;
+  joining?: boolean;
 }) {
   const remoteParticipants = useRemoteParticipants();
   const connectionState = useConnectionState();
@@ -788,27 +820,41 @@ function CallRoomContent({
         {/* Controls bar */}
         <div className="flex items-center justify-between bg-[#111113] px-3 py-2.5">
           <div className="flex items-center gap-1.5">
-            {/* Mic toggle */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation(); // prevent any parent drag handlers
-                void toggleMic();
-              }}
-              title={isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-                isMicrophoneEnabled
-                  ? "bg-white/10 text-white hover:bg-white/20"
-                  : "bg-red-500/90 text-white hover:bg-red-500",
-              )}
-            >
-              {isMicrophoneEnabled ? (
-                <Mic className="h-3.5 w-3.5" />
-              ) : (
-                <MicOff className="h-3.5 w-3.5" />
-              )}
-            </button>
+            {connectionState === ConnectionState.Disconnected && onReconnect ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReconnect();
+                }}
+                disabled={joining}
+                className="flex h-8 items-center gap-1.5 rounded-full bg-brand px-3 text-[11px] font-semibold text-white transition-colors hover:bg-brand/90 disabled:opacity-60"
+              >
+                {joining ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <RefreshCw className="h-3 w-3" />}
+                Reconnect
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation(); // prevent any parent drag handlers
+                  void toggleMic();
+                }}
+                title={isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  isMicrophoneEnabled
+                    ? "bg-white/10 text-white hover:bg-white/20"
+                    : "bg-red-500/90 text-white hover:bg-red-500",
+                )}
+              >
+                {isMicrophoneEnabled ? (
+                  <Mic className="h-3.5 w-3.5" />
+                ) : (
+                  <MicOff className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
 
             {/* End call with confirm */}
             <button
@@ -842,34 +888,38 @@ function CallRoomContent({
           )}
         </div>
 
-        {/* End call confirmation overlay (minimized) */}
-        {endConfirmOpen && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#1a1a1d]/95 backdrop-blur-sm px-3 py-3">
-            <p className="mb-2 text-[12px] font-bold text-white">End this call?</p>
-            <div className="flex w-full gap-2">
-              <button
-                type="button"
-                className="flex-1 rounded-full bg-white/10 py-2 text-[11px] font-medium text-white/70 transition hover:bg-white/20"
-                onClick={(e) => { e.stopPropagation(); setEndConfirmOpen(false); }}
+        {/* End call confirmation dialog (minimized) */}
+        <Dialog open={endConfirmOpen} onOpenChange={setEndConfirmOpen}>
+          <DialogContent className="max-w-xs rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold text-center">End this call?</DialogTitle>
+              <DialogDescription className="text-xs text-center">
+                This will close the call session for this patient.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex flex-row gap-2 mt-4 sm:justify-center">
+              <Button
+                variant="outline"
+                className="flex-1 rounded-xl h-10 text-xs text-brand-dark"
+                onClick={() => setEndConfirmOpen(false)}
               >
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="flex-1 rounded-full bg-red-500 py-2 text-[11px] font-semibold text-white transition hover:bg-red-400 disabled:opacity-60"
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1 rounded-xl h-10 text-xs bg-red-500 hover:bg-red-600 text-white"
                 disabled={endLoading}
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={() => {
                   hapticPulse();
                   setEndConfirmOpen(false);
                   onEnd();
                 }}
               >
                 End call
-              </button>
-            </div>
-          </div>
-        )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <RoomAudioRenderer />
       </div>
