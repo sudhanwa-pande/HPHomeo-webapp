@@ -16,10 +16,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+import disposableDomains from "disposable-email-domains";
+
+const CUSTOM_BLOCKLIST = [
+  "test.com", "test123.com", "example.com", "dummy.com", "fake.com", 
+  "test.in", "example.in", "xyz.com", "abc.com", "asdf.com"
+];
+
 const registerSchema = z
   .object({
     full_name: z.string().min(2, "Name must be at least 2 characters").max(80),
-    email: z.email("Enter a valid email"),
+    email: z.email("Enter a valid email").refine(
+      (val) => {
+        const domain = val.split("@")[1]?.toLowerCase();
+        if (!domain) return false;
+        if (CUSTOM_BLOCKLIST.includes(domain)) return false;
+        if (disposableDomains.includes(domain)) return false;
+        return true;
+      },
+      { message: "Disposable or test emails are not allowed" }
+    ),
     phone: z
       .string()
       .regex(/^\+[1-9]\d{7,14}$/, "Phone must be in format +91XXXXXXXXXX"),
