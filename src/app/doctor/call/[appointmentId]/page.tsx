@@ -1,17 +1,14 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LiveKitRoom, LocalUserChoices } from "@livekit/components-react";
+import { RoomContext, LocalUserChoices } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { ArrowLeft, CheckCircle2, CircleAlert, Loader2, PhoneOff, User } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleAlert, Loader2, PhoneOff } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
 import api from "@/lib/api";
 import {
   getMediaDeviceErrorMessage,
-  LIVEKIT_ROOM_OPTIONS,
 } from "@/lib/media";
 import { notifyApiError, notifyError, notifySuccess } from "@/lib/notify";
 import { useEventStream } from "@/hooks/use-event-stream";
@@ -20,6 +17,9 @@ import { LiveCallRoom } from "@/components/call/live-call-room";
 import { CustomPreJoin } from "@/components/call/custom-pre-join";
 import { Button } from "@/components/ui/button";
 import type { DoctorAppointment } from "@/types/doctor";
+import { useCallStore } from "@/stores/call-store";
+import { callSession } from "@/lib/call-session";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 
 interface VideoTokenResponse {
   provider: string;
@@ -27,13 +27,6 @@ interface VideoTokenResponse {
   room: string;
   token: string;
 }
-
-type MediaPreferences = {
-  audio: boolean;
-  video: boolean;
-};
-
-
 
 export default function CallRoomPage() {
   return (
@@ -48,51 +41,26 @@ function CallRoomContent() {
   const params = useParams();
   const appointmentId = params.appointmentId as string;
   const queryClient = useQueryClient();
-  const autoResumeAttemptedRef = useRef(false);
-  const joinInFlightRef = useRef(false);
-  const refreshInFlightRef = useRef(false);
   const isMountedRef = useRef(true);
-  const callEndedRef = useRef(false);
+
+  const { room, uiPhase, callStartedAt } = useCallStore();
+  const [joining, setJoining] = useState(false);
+
+  useWakeLock(uiPhase === "incall" || uiPhase === "reconnecting");
 
   useEffect(() => {
+    isMountedRef.current = true;
+    useCallStore.getState().reset();
     return () => {
       isMountedRef.current = false;
+      void callSession.destroy();
     };
   }, []);
 
-  const resumeStorageKey = `ehomeo:doctor-call:${appointmentId}`;
-  const resumeAttemptStorageKey = `${resumeStorageKey}:resume-lock`;
-
-  const [tokenData, setTokenData] = useState<VideoTokenResponse | null>(null);
-  const [joining, setJoining] = useState(false);
-  const [callEnded, setCallEnded] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
-  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
-  const [mediaPreferences, setMediaPreferences] = useState<MediaPreferences>({
-    audio: true,
-    video: true,
-  });
-
-  // Safety net: stop all camera/mic tracks when this page unmounts (navigation away)
-  // LiveKitRoom should handle this, but some browsers hold tracks if cleanup races
-  useEffect(() => {
-    return () => {
-      document.querySelectorAll("video, audio").forEach((el) => {
-        const media = el as HTMLMediaElement;
-        if (media.srcObject instanceof MediaStream) {
-          media.srcObject.getTracks().forEach((t) => t.stop());
-          media.srcObject = null;
-        }
-      });
-    };
-  }, []);
-
-  // SSE for real-time call status updates. This page is standalone (not inside
-  // DoctorShell), so it needs its own SSE connection.
-  // keepAlive prevents disconnect on mobile tab switch during active calls.
+  // SSE for real-time call status updates.
   useEventStream({
     path: "/doctor/events/stream",
-    keepAlive: Boolean(tokenData),
+    keepAlive: uiPhase === "incall" || uiPhase === "reconnecting",
     onEvent: {
       call_state_changed: () => {
         queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail", appointmentId] });
@@ -112,69 +80,6 @@ function CallRoomContent() {
     },
   });
 
-  const clearResumeState = useCallback(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.sessionStorage.removeItem(resumeStorageKey);
-    window.sessionStorage.removeItem(resumeAttemptStorageKey);
-  }, [resumeAttemptStorageKey, resumeStorageKey]);
-  const clearResumeAttemptLock = useCallback(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.sessionStorage.removeItem(resumeAttemptStorageKey);
-  }, [resumeAttemptStorageKey]);
-  const persistResumeState = useCallback(
-    (preferences: MediaPreferences) => {
-      if (typeof window === "undefined") {
-        return;
-      }
-
-      window.sessionStorage.setItem(
-        resumeStorageKey,
-        JSON.stringify(preferences),
-      );
-    },
-    [resumeStorageKey],
-  );
-  const handleMediaDeviceFailure = useCallback(
-    (_failure?: unknown, kind?: string) => {
-      const message =
-        kind === "audioinput"
-          ? "Microphone access failed. You can stay in the call muted."
-          : "Camera access failed. You can stay in the call without video.";
-      setJoinError(message);
-      notifyError("Media access issue", message);
-    },
-    [],
-  );
-  const handleDisconnected = useCallback((reason?: unknown) => {
-    // Ignore disconnects that are part of the normal end-call flow
-    if (callEndedRef.current) return;
-
-    console.log("Disconnected:", reason);
-    const reasonStr = String(reason);
-
-    // Ignore transient network issues and let LiveKit's internal auto-reconnect handle it
-    if (reasonStr === "network" || reasonStr === "CLIENT_INITIATED_RECONNECT" || reasonStr === "signal_connection_disconnected") {
-      return;
-    }
-
-    if (["server_shutdown", "room_deleted", "user_rejected", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
-        setJoinError("Connection dropped. Rejoin the consultation to continue.");
-        setTokenData(null);
-        setCallStartedAt(null);
-        clearResumeAttemptLock();
-    } else {
-        setTokenData(null);
-        setCallStartedAt(null);
-        clearResumeAttemptLock();
-    }
-  }, [clearResumeAttemptLock]);
-
   const { data: appointment, isLoading: appointmentLoading } = useQuery({
     queryKey: ["doctor-appointment-detail", appointmentId],
     queryFn: async () => {
@@ -183,91 +88,66 @@ function CallRoomContent() {
     },
   });
 
-  // Polling fallback to detect status drift
-  useEffect(() => {
-    if (!tokenData) return;
-    const interval = setInterval(() => {
-      queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail", appointmentId] });
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [appointmentId, tokenData, queryClient]);
-
   const joinCall = useCallback(
     async (values: LocalUserChoices) => {
-      if (joinInFlightRef.current) {
-        return;
-      }
+      // Guard against double joins or joining in incorrect phase
+      if (uiPhase !== "prejoin" || callSession.getRoom()) return;
 
-      joinInFlightRef.current = true;
       setJoining(true);
-      setJoinError(null);
-
       try {
         const { data } = await api.post<VideoTokenResponse>(`/doctor/appointments/${appointmentId}/video-token`);
         
         if (isMountedRef.current) {
-          setTokenData(data);
-          setMediaPreferences({
-            audio: values.audioEnabled,
-            video: values.videoEnabled,
-          });
-          persistResumeState({
-            audio: values.audioEnabled,
-            video: values.videoEnabled,
-          });
+          sessionStorage.setItem("activeCallChoices", JSON.stringify({ audioEnabled: values.audioEnabled, videoEnabled: values.videoEnabled }));
+          await callSession.connect(data.server_url, data.token, appointmentId, "doctor", tokenRefresher);
+          await callSession.publishTracks(values.audioEnabled, values.videoEnabled);
         }
-        // callStartedAt is set via onConnected when the room actually connects,
-        // not here — avoids counting ICE/DTLS negotiation time in the call timer.
       } catch (error) {
         const message = getMediaDeviceErrorMessage(error);
-        setJoinError(message);
-
-        if (error instanceof Error && ["NotAllowedError", "NotFoundError", "NotReadableError", "AbortError"].includes(error.name)) {
-          notifyError("Couldn't start media", message);
-        } else {
-          notifyApiError(error, "Couldn't start call");
-        }
+        notifyError("Couldn't start call", message);
       } finally {
-        joinInFlightRef.current = false;
         if (isMountedRef.current) {
           setJoining(false);
         }
       }
     },
-    [
-      appointmentId,
-      persistResumeState,
-    ],
+    [appointmentId, uiPhase],
   );
 
-  const tokenRefresher = useCallback(async () => {
-    if (refreshInFlightRef.current) {
-      // Don't return empty string — the SDK would try to use it as a JWT.
-      // Throw so the SDK retries with the existing valid token.
-      throw new Error("Token refresh already in progress");
-    }
-    refreshInFlightRef.current = true;
+  const tokenRefresher = useCallback(async (reason?: string) => {
     try {
-      const { data } = await api.post<VideoTokenResponse>(`/doctor/appointments/${appointmentId}/video-token`);
+      const { data } = await api.post<VideoTokenResponse>(
+        `/doctor/appointments/${appointmentId}/video-token`,
+        { recovery_reason: reason }
+      );
       return data.token;
-    } finally {
-      if (isMountedRef.current) {
-        refreshInFlightRef.current = false;
-      }
+    } catch (e) {
+      throw new Error("Token refresh failed: " + String(e));
     }
   }, [appointmentId]);
 
+  // Auto-resume call after page refresh
+  useEffect(() => {
+    if (uiPhase === "prejoin") {
+      const activeCallId = sessionStorage.getItem("activeCallId");
+      const choicesRaw = sessionStorage.getItem("activeCallChoices");
+      if (activeCallId === appointmentId && choicesRaw) {
+        try {
+          const choices = JSON.parse(choicesRaw);
+          void joinCall(choices);
+        } catch (e) {
+          console.error("Failed to parse auto-resume choices", e);
+        }
+      }
+    }
+  }, [appointmentId, uiPhase, joinCall]);
+
   // Disconnect room if appointment status becomes "ended" (via SSE/polling)
   useEffect(() => {
-    if (callEnded) return;
-    if (appointment?.call_status === "ended" && tokenData) {
-      callEndedRef.current = true;
-      setCallEnded(true);
-      setTokenData(null);
-      setCallStartedAt(null);
-      clearResumeState();
+    if (appointment?.call_status === "ended" && room) {
+      void callSession.disconnect();
     }
-  }, [appointment?.call_status, tokenData, clearResumeState, callEnded]);
+  }, [appointment?.call_status, room]);
 
   const endCallMutation = useMutation({
     mutationFn: async () => {
@@ -275,84 +155,12 @@ function CallRoomContent() {
     },
     onSuccess: () => {
       notifySuccess("Call ended", "The consultation session has been closed.");
-      clearResumeState();
-      callEndedRef.current = true;
-      setCallEnded(true);
-      setTokenData(null);
-      setCallStartedAt(null);
+      void callSession.disconnect();
       queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] });
       queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
     },
     onError: (error) => notifyApiError(error, "Couldn't end call"),
   });
-
-  useEffect(() => {
-    if (
-      autoResumeAttemptedRef.current ||
-      tokenData ||
-      joining ||
-      callEnded ||
-      !appointment ||
-      appointment.mode !== "online" ||
-      !appointment.video_enabled ||
-      appointment.status !== "confirmed"
-    ) {
-      return;
-    }
-
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const saved = window.sessionStorage.getItem(resumeStorageKey);
-    if (!saved) {
-      return;
-    }
-
-    const existingResumeLock = Number(
-      window.sessionStorage.getItem(resumeAttemptStorageKey) || 0,
-    );
-    if (
-      Number.isFinite(existingResumeLock) &&
-      existingResumeLock > 0 &&
-      Date.now() - existingResumeLock < 10_000
-    ) {
-      return;
-    }
-
-    window.sessionStorage.setItem(
-      resumeAttemptStorageKey,
-      String(Date.now()),
-    );
-    autoResumeAttemptedRef.current = true;
-
-    try {
-      const parsed = JSON.parse(saved) as Partial<MediaPreferences>;
-      const nextPreferences: LocalUserChoices = {
-        videoEnabled: parsed.video ?? true,
-        audioEnabled: parsed.audio ?? true,
-        videoDeviceId: "",
-        audioDeviceId: "",
-        username: "",
-      };
-      setMediaPreferences({
-        audio: nextPreferences.audioEnabled,
-        video: nextPreferences.videoEnabled,
-      });
-      void joinCall(nextPreferences);
-    } catch {
-      clearResumeState();
-    }
-  }, [
-    appointment,
-    callEnded,
-    clearResumeState,
-    joinCall,
-    joining,
-    resumeAttemptStorageKey,
-    resumeStorageKey,
-    tokenData,
-  ]);
 
   const completeMutation = useMutation({
     mutationFn: async () => {
@@ -379,46 +187,7 @@ function CallRoomContent() {
     appointment.video_enabled &&
     appointment.status === "confirmed";
 
-  if (callEnded) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#111113] px-4">
-        <div className="w-full max-w-md rounded-3xl border border-white/[0.06] bg-[#161618] p-8 text-center text-white">
-          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10">
-            <PhoneOff className="h-7 w-7 text-emerald-400" />
-          </div>
-          <h2 className="text-2xl font-semibold tracking-tight">Call ended</h2>
-          <p className="mt-2 text-sm leading-relaxed text-white/45">
-            {appointment?.patient?.full_name
-              ? `The consultation with ${appointment.patient.full_name} has finished.`
-              : "The consultation has finished."}
-          </p>
-
-          <div className="mt-8 space-y-2.5">
-            {appointment?.status === "confirmed" ? (
-              <Button
-                className="h-11 w-full rounded-2xl bg-emerald-500 text-sm font-semibold text-white hover:bg-emerald-400"
-                loading={completeMutation.isPending}
-                onClick={() => completeMutation.mutate()}
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                Mark appointment completed
-              </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              className="h-11 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
-              onClick={() => router.push(`/doctor/appointments/${appointmentId}`)}
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to appointments
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!canStartCall) {
+  if (!canStartCall && uiPhase !== "ended") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#111113] px-4">
         <div className="w-full max-w-md rounded-3xl border border-white/[0.06] bg-[#161618] p-8 text-center text-white">
@@ -444,35 +213,31 @@ function CallRoomContent() {
     );
   }
 
-  // Unified Render with Fake Instant Join Handoff
   return (
     <div className="relative h-screen bg-[#111113] flex flex-col" data-lk-theme="default">
-      {/* 1. Lobby (PreJoin) - Acquires hardware locks seamlessly BEFORE joining. Stays mounted with a blur until connected. */}
-      {(!tokenData || !callStartedAt) && (
+      {/* 1. Lobby (PreJoin) */}
+      {uiPhase === "prejoin" && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#060B14]">
           <CustomPreJoin
             onSubmit={joinCall}
             patientName={appointment?.patient?.full_name || "Doctor"}
-            isJoining={joining || !!tokenData}
+            isJoining={joining}
             otherPartyWaiting={appointment?.call_status === "waiting"}
           />
         </div>
       )}
 
-      {/* 2. Active Call — mounts WebRTC in the background, auto-acquires nothing */}
-      {tokenData && (
-        <LiveKitRoom
-          key={appointmentId}
-          serverUrl={tokenData.server_url}
-          token={tokenData.token}
-          connect={true}
-          audio={false}
-          video={false}
-          options={LIVEKIT_ROOM_OPTIONS}
-          onMediaDeviceFailure={handleMediaDeviceFailure}
-          onDisconnected={handleDisconnected}
-          className="h-full w-full"
-        >
+      {/* 2. Connecting State */}
+      {uiPhase === "connecting" && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#060B14] text-white">
+          <Loader2 className="h-10 w-10 animate-spin text-brand mb-4" />
+          <p className="text-sm font-medium text-white/60 animate-pulse">Connecting to call...</p>
+        </div>
+      )}
+
+      {/* 3. Active Call */}
+      {room && (uiPhase === "incall" || uiPhase === "reconnecting") && (
+        <RoomContext.Provider value={room}>
           <LiveCallRoom
             title={appointment?.patient?.full_name ?? "Video consultation"}
             subtitle={appointment ? format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy - hh:mm a") : "Consultation"}
@@ -481,7 +246,6 @@ function CallRoomContent() {
             remoteWaitingDescription="The patient will appear here when they join the consultation room."
             onBack={() => router.push(`/doctor/appointments/${appointmentId}`)}
             onLeave={() => endCallMutation.mutate()}
-            onConnected={() => setCallStartedAt(Date.now())}
             tokenRefresher={tokenRefresher}
             endLoading={endCallMutation.isPending}
             endLabel="End consultation"
@@ -490,7 +254,47 @@ function CallRoomContent() {
             infoLabel="Patient details"
             infoContent={appointment ? <DoctorInfoPanel appointment={appointment} /> : null}
           />
-        </LiveKitRoom>
+        </RoomContext.Provider>
+      )}
+
+      {/* 4. Ended Screen */}
+      {uiPhase === "ended" && (
+        <div className="flex min-h-screen items-center justify-center bg-[#111113] px-4">
+          <div className="w-full max-w-md rounded-3xl border border-white/[0.06] bg-[#161618] p-8 text-center text-white">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10">
+              <PhoneOff className="h-7 w-7 text-emerald-400" />
+            </div>
+            <h2 className="text-2xl font-semibold tracking-tight">Call ended</h2>
+            <p className="mt-2 text-sm leading-relaxed text-white/45">
+              {appointment?.patient?.full_name
+                ? `The consultation with ${appointment.patient.full_name} has finished.`
+                : "The consultation has finished."}
+            </p>
+
+            <div className="mt-8 space-y-2.5">
+              {appointment?.status === "confirmed" ? (
+                <Button
+                  className="h-11 w-full rounded-2xl bg-emerald-500 text-sm font-semibold text-white hover:bg-emerald-400"
+                  loading={completeMutation.isPending}
+                  onClick={() => completeMutation.mutate()}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Mark appointment completed
+                </Button>
+              ) : null}
+              <Button
+                variant="outline"
+                className="h-11 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
+                onClick={() => {
+                  router.push(`/doctor/appointments/${appointmentId}`);
+                }}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to appointments
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

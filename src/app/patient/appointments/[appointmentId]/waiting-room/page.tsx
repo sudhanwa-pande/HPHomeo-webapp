@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LiveKitRoom } from "@livekit/components-react";
+import { RoomContext } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
@@ -25,14 +25,11 @@ import { AuthGuard } from "@/components/auth-guard";
 import api from "@/lib/api";
 import { formatTime, formatDate } from "@/lib/appointment-utils";
 import {
-  buildPreferredAudioConstraints,
-  buildPreferredVideoConstraints,
   getMediaDeviceErrorMessage,
-  LIVEKIT_ROOM_OPTIONS,
   prepareMediaChoices,
   type CameraFacingMode,
 } from "@/lib/media";
-import { notifyApiError, notifyError, notifyInfo } from "@/lib/notify";
+import { notifyError, notifyInfo } from "@/lib/notify";
 import { useCountdown } from "@/hooks/use-countdown";
 import { useEventStream } from "@/hooks/use-event-stream";
 import { PatientShell } from "@/components/patient/patient-shell";
@@ -42,6 +39,9 @@ import { Skeleton } from "@/components/loading";
 import { DoctorInfoCard } from "@/components/appointment/doctor-info-card";
 import { cn } from "@/lib/utils";
 import type { VideoTokenResponse } from "@/types/doctor";
+import { useCallStore } from "@/stores/call-store";
+import { callSession } from "@/lib/call-session";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 
 const TIPS = [
   "Find a quiet, well-lit place for your consultation.",
@@ -60,11 +60,9 @@ function WaitingRoomContent() {
   const appointmentId = params.appointmentId as string;
   const [tipIndex, setTipIndex] = useState(0);
 
-  // LiveKit state
-  const [tokenData, setTokenData] = useState<VideoTokenResponse | null>(null);
+  const { room, uiPhase, callStartedAt } = useCallStore();
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
-  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
   const [mediaPreferences, setMediaPreferences] = useState<MediaPreferences>({
     audio: true,
     video: true,
@@ -72,13 +70,17 @@ function WaitingRoomContent() {
   const [preferredFacingMode, setPreferredFacingMode] =
     useState<CameraFacingMode>("user");
   const joinInFlightRef = useRef(false);
-  const refreshInFlightRef = useRef(false);
   const isMountedRef = useRef(true);
-  const callEndedRef = useRef(false);
+
+  // Keep screen awake during consultation
+  useWakeLock(uiPhase === "incall" || uiPhase === "reconnecting");
 
   useEffect(() => {
+    isMountedRef.current = true;
+    useCallStore.getState().reset();
     return () => {
       isMountedRef.current = false;
+      void callSession.destroy();
     };
   }, []);
 
@@ -133,10 +135,9 @@ function WaitingRoomContent() {
   });
 
   // SSE for appointment status updates
-  // keepAlive prevents disconnect on mobile tab switch when connected to the call.
   const { connectionState: sseState, hasConnected: sseHasConnected } = useEventStream({
     path: "/patient/events/stream",
-    keepAlive: Boolean(tokenData),
+    keepAlive: uiPhase === "incall" || uiPhase === "reconnecting",
     onEvent: {
       call_state_changed: () => {
         queryClient.invalidateQueries({
@@ -163,19 +164,10 @@ function WaitingRoomContent() {
 
   const countdown = useCountdown(apt?.scheduled_at);
 
-  const videoOptions = useMemo(
-    () =>
-      buildPreferredVideoConstraints(
-        mediaPreferences.video,
-        preferredFacingMode,
-      ),
-    [mediaPreferences.video, preferredFacingMode],
-  );
-
   // Connect to LiveKit — called after media check passes
   const connectToRoom = useCallback(
     async (options?: Partial<MediaPreferences>) => {
-      if (joinInFlightRef.current || tokenData) return;
+      if (joinInFlightRef.current || room) return;
 
       const wantsAudio = options?.audio ?? mediaPreferences.audio;
       const wantsVideo = options?.video ?? mediaPreferences.video;
@@ -203,24 +195,16 @@ function WaitingRoomContent() {
           `/patient/appointments/${appointmentId}/video-token`,
           {},
         );
-        setTokenData(data);
-        // callStartedAt is set via onConnected when the room actually connects.
+        
+        if (isMountedRef.current) {
+          sessionStorage.setItem("activeCallChoices", JSON.stringify({ audioEnabled: prepared.audio, videoEnabled: prepared.video }));
+          await callSession.connect(data.server_url, data.token, appointmentId, "patient", tokenRefresher);
+          await callSession.publishTracks(prepared.audio, prepared.video);
+        }
       } catch (error) {
         const message = getMediaDeviceErrorMessage(error);
         setJoinError(message);
-        if (
-          error instanceof Error &&
-          [
-            "NotAllowedError",
-            "NotFoundError",
-            "NotReadableError",
-            "AbortError",
-          ].includes(error.name)
-        ) {
-          notifyError("Couldn't start media", message);
-        } else {
-          notifyApiError(error, "Couldn't connect to consultation room");
-        }
+        notifyError("Couldn't join call", message);
       } finally {
         joinInFlightRef.current = false;
         if (isMountedRef.current) {
@@ -228,68 +212,32 @@ function WaitingRoomContent() {
         }
       }
     },
-    [appointmentId, mediaPreferences.audio, mediaPreferences.video, preferredFacingMode, tokenData],
+    [appointmentId, mediaPreferences.audio, mediaPreferences.video, preferredFacingMode, room],
   );
 
-  const tokenRefresher = useCallback(async () => {
-    if (refreshInFlightRef.current) {
-      // Don't return empty string — the SDK would try to use it as a JWT.
-      // Throw so the SDK retries with the existing valid token.
-      throw new Error("Token refresh already in progress");
-    }
-    refreshInFlightRef.current = true;
+  const tokenRefresher = useCallback(async (reason?: string) => {
     try {
       const { data } = await api.post<VideoTokenResponse>(
         `/patient/appointments/${appointmentId}/video-token`,
-        {},
+        { recovery_reason: reason },
       );
       return data.token;
-    } finally {
-      if (isMountedRef.current) {
-        refreshInFlightRef.current = false;
-      }
+    } catch (e) {
+      throw new Error("Token refresh failed: " + String(e));
     }
   }, [appointmentId]);
 
   // Auto-connect to LiveKit only when doctor is ready
   const autoConnectRef = useRef(false);
   useEffect(() => {
-    if (autoConnectRef.current || tokenData || joining) return;
+    if (autoConnectRef.current || room || joining) return;
     
-    // Only auto-connect if the doctor has initiated the call (or is already connected)
-    // and the call hasn't already ended
     if (apt?.call_status === "ended") return;
     if (apt?.call_status === "waiting" || apt?.call_status === "connected") {
       autoConnectRef.current = true;
       void connectToRoom();
     }
-  }, [connectToRoom, tokenData, joining, apt?.call_status]);
-
-  const handleMediaDeviceFailure = useCallback(
-    (_failure?: unknown, kind?: string) => {
-      const message =
-        kind === "audioinput"
-          ? "Microphone access failed. You can stay in the call muted."
-          : "Camera access failed. You can stay in the call without video.";
-      setJoinError(message);
-      notifyError("Media access issue", message);
-    },
-    [],
-  );
-
-  const handleDisconnect = useCallback((reason?: unknown) => {
-    // Don't show "connection dropped" if the call was intentionally ended
-    if (callEndedRef.current) return;
-    const reasonStr = String(reason);
-    if (["server_shutdown", "room_deleted", "user_rejected", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
-      setJoinError("Connection dropped. Trying to reconnect...");
-      setTokenData(null);
-      autoConnectRef.current = false;
-    } else {
-      setTokenData(null);
-      autoConnectRef.current = false;
-    }
-  }, []);
+  }, [connectToRoom, room, joining, apt?.call_status]);
 
   // ─── Loading state ───────────────────────────────────────────────
   if (isLoading) {
@@ -321,9 +269,7 @@ function WaitingRoomContent() {
   }
 
   // ─── Ended / Cannot Join logic ───────────────────────────────────
-  if (apt.call_status === "ended") {
-    // Mark as ended so disconnect handler + auto-connect don't fire
-    callEndedRef.current = true;
+  if (apt.call_status === "ended" || uiPhase === "ended") {
     return <ConsultationEnded appointmentId={appointmentId} duration={apt.duration_min} />;
   }
 
@@ -345,34 +291,17 @@ function WaitingRoomContent() {
     );
   }
 
-  // ─── If connected to LiveKit, show full-screen call UI ───────────
-  if (tokenData && apt) {
+  if (room && (uiPhase === "incall" || uiPhase === "reconnecting")) {
     return (
-      <LiveKitRoom
-        key={appointmentId}
-        serverUrl={tokenData.server_url}
-        token={tokenData.token}
-        connect
-        audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
-        video={videoOptions}
-        options={LIVEKIT_ROOM_OPTIONS}
-        onMediaDeviceFailure={handleMediaDeviceFailure}
-        className="h-screen"
-        onDisconnected={handleDisconnect}
-      >
+      <RoomContext.Provider value={room}>
         <LiveCallRoom
           title={apt.doctor_name}
           subtitle={`${formatDate(apt.scheduled_at)} · ${formatTime(apt.scheduled_at)}`}
           remoteLabel={apt.doctor_name}
           remoteWaitingTitle={`Waiting for Dr. ${apt.doctor_name.split(" ").pop()}`}
           remoteWaitingDescription="You're in the consultation room. The doctor will appear here as soon as they join."
-          onLeave={() =>
-            router.push(`/patient/appointments/${appointmentId}`)
-          }
-          onBack={() =>
-            router.push(`/patient/appointments/${appointmentId}`)
-          }
-          onConnected={() => setCallStartedAt(Date.now())}
+          onLeave={handleLeave}
+          onBack={handleLeave}
           tokenRefresher={tokenRefresher}
           endLabel="Leave call"
           infoLabel="Appointment details"
@@ -401,7 +330,7 @@ function WaitingRoomContent() {
           onFacingModeChange={setPreferredFacingMode}
           callStartedAt={callStartedAt}
         />
-      </LiveKitRoom>
+      </RoomContext.Provider>
     );
   }
 
@@ -474,7 +403,7 @@ function WaitingRoomContent() {
                   Waiting for Dr. {apt.doctor_name.split(" ").pop()}
                 </h2>
                 <p className="mx-auto mt-1.5 max-w-sm text-sm text-gray-500">
-                  You'll be connected automatically when the doctor joins
+                  You&apos;ll be connected automatically when the doctor joins
                 </p>
               </>
             )}

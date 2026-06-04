@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Camera, CameraOff, Mic, MicOff, Video, AlertTriangle } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { Camera, CameraOff, Mic, MicOff, Video } from "lucide-react";
 import type { LocalUserChoices } from "@livekit/components-react";
-import type { LocalVideoTrack, LocalAudioTrack } from "livekit-client";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -14,7 +13,6 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { hapticTap } from "@/lib/haptics";
-import { mediaManager } from "@/lib/media-manager";
 import { logEvent } from "@/lib/logger";
 
 interface CustomPreJoinProps {
@@ -27,8 +25,7 @@ interface CustomPreJoinProps {
 export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = false, otherPartyWaiting = false }: CustomPreJoinProps) {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [videoTrack, setVideoTrack] = useState<LocalVideoTrack | null>(null);
-  const [audioTrack, setAudioTrack] = useState<LocalAudioTrack | null>(null);
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -53,16 +50,49 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
 
   useEffect(() => {
     let mounted = true;
+    let activeStream: MediaStream | null = null;
+
     const initMedia = async () => {
       try {
         setIsLoading(true);
         setError(null);
-        const { video, audio } = await mediaManager.acquireTracks();
-        if (mounted) {
-          setVideoTrack(video);
-          setAudioTrack(audio);
-          setSelectedVideoDevice(mediaManager.videoDeviceId || "");
-          setSelectedAudioDevice(mediaManager.audioDeviceId || "");
+
+        const constraints: MediaStreamConstraints = {
+          video: videoEnabled
+            ? {
+                deviceId: selectedVideoDevice ? { exact: selectedVideoDevice } : undefined,
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              }
+            : false,
+          audio: audioEnabled
+            ? {
+                deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined,
+              }
+            : false,
+        };
+
+        if (constraints.video || constraints.audio) {
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (mounted) {
+            activeStream = stream;
+            setPreviewStream(stream);
+            
+            const vTrack = stream.getVideoTracks()[0];
+            const aTrack = stream.getAudioTracks()[0];
+            if (vTrack && !selectedVideoDevice) {
+              setSelectedVideoDevice(vTrack.getSettings().deviceId || "");
+            }
+            if (aTrack && !selectedAudioDevice) {
+              setSelectedAudioDevice(aTrack.getSettings().deviceId || "");
+            }
+          } else {
+            stream.getTracks().forEach((track) => track.stop());
+          }
+        } else {
+          if (mounted) {
+            setPreviewStream(null);
+          }
         }
       } catch (err: any) {
         if (mounted) {
@@ -72,72 +102,57 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
           } else if (err?.name === "NotAllowedError") {
             setError("Camera or microphone permission was denied. Please allow access in your browser settings.");
           } else {
-            setError("Failed to access camera or microphone. You can join with audio only.");
+            setError("Failed to access camera or microphone.");
           }
           setVideoEnabled(false);
         }
       } finally {
-        if (mounted) setIsLoading(false);
+        if (mounted) {
+          setIsLoading(false);
+        }
       }
     };
+
     initMedia();
+
     return () => {
       mounted = false;
+      if (activeStream) {
+        activeStream.getTracks().forEach((track) => track.stop());
+      }
     };
-  }, []);
+  }, [videoEnabled, audioEnabled, selectedVideoDevice, selectedAudioDevice]);
 
-  // Update track enabled state when toggled
+  // Attach stream to video tag
   useEffect(() => {
-    if (videoTrack) {
-      if (videoEnabled && videoTrack.isMuted) videoTrack.unmute();
-      if (!videoEnabled && !videoTrack.isMuted) videoTrack.mute();
+    if (videoRef.current) {
+      videoRef.current.srcObject = previewStream;
     }
-  }, [videoEnabled, videoTrack]);
+  }, [previewStream]);
 
-  useEffect(() => {
-    if (audioTrack) {
-      if (audioEnabled && audioTrack.isMuted) audioTrack.unmute();
-      if (!audioEnabled && !audioTrack.isMuted) audioTrack.mute();
-    }
-  }, [audioEnabled, audioTrack]);
-
-  // Attach the LiveKit track to our custom video element
-  useEffect(() => {
-    if (videoTrack && videoRef.current) {
-      videoTrack.attach(videoRef.current);
-      return () => {
-        if (videoRef.current) videoTrack.detach(videoRef.current);
-      };
-    }
-  }, [videoTrack]);
-
-  const handleDeviceChange = async (kind: "videoinput" | "audioinput", deviceId: string) => {
-    try {
-      setIsLoading(true);
-      if (kind === "videoinput") setSelectedVideoDevice(deviceId);
-      else setSelectedAudioDevice(deviceId);
-      
-      const { video, audio } = await mediaManager.acquireTracks(
-        kind === "videoinput" ? deviceId : selectedVideoDevice,
-        kind === "audioinput" ? deviceId : selectedAudioDevice
-      );
-      setVideoTrack(video);
-      setAudioTrack(audio);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsLoading(false);
+  const handleDeviceChange = (kind: "videoinput" | "audioinput", deviceId: string) => {
+    if (kind === "videoinput") {
+      setSelectedVideoDevice(deviceId);
+    } else {
+      setSelectedAudioDevice(deviceId);
     }
   };
 
   const handleSubmit = () => {
     if (isJoining) return;
     hapticTap();
+    
+    // Stop the preview tracks before calling onSubmit to release resources
+    if (previewStream) {
+      previewStream.getTracks().forEach((track) => track.stop());
+      setPreviewStream(null);
+    }
+
     onSubmit({
       videoEnabled,
       audioEnabled,
-      videoDeviceId: mediaManager.videoDeviceId || "",
-      audioDeviceId: mediaManager.audioDeviceId || "",
+      videoDeviceId: selectedVideoDevice,
+      audioDeviceId: selectedAudioDevice,
       username: patientName,
     });
   };
@@ -158,7 +173,7 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
               </div>
             ) : null}
 
-            {/* Fake Instant Join Blur Overlay */}
+            {/* Blur Overlay */}
             {isJoining && (
               <div className="absolute inset-0 z-40 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center transition-all duration-300">
                 <div className="flex gap-4 mb-4">
@@ -176,7 +191,7 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
               </div>
             )}
 
-            {videoEnabled && videoTrack && !error ? (
+            {videoEnabled && previewStream && !error ? (
               <video
                 ref={videoRef}
                 autoPlay
@@ -221,7 +236,7 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
               </div>
             )}
             
-            {/* Embedded Mobile Toggles (hidden on md screens) */}
+            {/* Embedded Mobile Toggles */}
             <div className="absolute bottom-6 right-6 flex gap-3 md:hidden z-30">
               <button
                 type="button"
@@ -255,14 +270,14 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
           </div>
         </div>
 
-        {/* Right side: Controls & Join (Desktop visible mostly, stacked on mobile) */}
+        {/* Right side: Controls & Join */}
         <div className="md:col-span-4 flex w-full flex-col space-y-6 pb-8 md:pb-0 z-10">
           <div className="space-y-2 text-center md:text-left">
             <h1 className="text-2xl font-bold text-white sm:text-3xl">Ready to join?</h1>
             <p className="text-sm text-white/50">Configure your devices before entering the consultation.</p>
           </div>
 
-          <div className="hidden md:flex flex-col gap-3 rounded-[1.5rem] bg-white/[0.03] p-5 border border-white-[0.08] shadow-lg backdrop-blur-sm">
+          <div className="hidden md:flex flex-col gap-3 rounded-[1.5rem] bg-white/[0.03] p-5 border border-white/[0.08] shadow-lg backdrop-blur-sm">
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-white/80">Microphone</span>
@@ -342,4 +357,5 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
     </div>
   );
 }
+
 

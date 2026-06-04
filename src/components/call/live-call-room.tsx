@@ -15,7 +15,7 @@ import {
 } from "@livekit/components-react";
 import type { TrackReference } from "@livekit/components-core";
 import { isTrackReference } from "@livekit/components-core";
-import { ConnectionQuality, ConnectionState, LocalTrack, Track } from "livekit-client";
+import { ConnectionQuality, ConnectionState, Track } from "livekit-client";
 import {
   ArrowLeft,
   Camera,
@@ -51,7 +51,6 @@ import { Button } from "@/components/ui/button";
 
 import { notifyError, notifyInfo } from "@/lib/notify";
 import { playIncomingMessageSound, playPatientWaitingSound } from "@/lib/sound";
-import { mediaManager } from "@/lib/media-manager";
 import { logEvent } from "@/lib/logger";
 import {
   getMediaDeviceErrorMessage,
@@ -60,7 +59,6 @@ import {
   type CameraFacingMode,
 } from "@/lib/media";
 import { cn } from "@/lib/utils";
-import { useWakeLock } from "@/hooks/use-wake-lock";
 import { Input } from "@/components/ui/input";
 
 type LiveCallRoomProps = {
@@ -71,10 +69,8 @@ type LiveCallRoomProps = {
   remoteWaitingDescription: string;
   onLeave: () => void;
   onBack?: () => void;
-  onConnected?: () => void;
-  /** NOTE: Not actively used in livekit-client v2.x (no room.setToken API).
-   *  Kept for future SDK upgrades that may support in-session token rotation. */
-  tokenRefresher?: () => Promise<string>;
+  /** Active token refresher callback used by CallSessionManager for session recovery */
+  tokenRefresher?: (reason?: string) => Promise<string>;
   infoContent?: React.ReactNode;
   infoLabel?: string;
   endLabel?: string;
@@ -83,7 +79,7 @@ type LiveCallRoomProps = {
   allowCameraSwitch?: boolean;
   preferredFacingMode?: CameraFacingMode;
   onFacingModeChange?: (mode: CameraFacingMode) => void;
-  /** Timestamp (ms) when the call connected — set via onConnected, not on token fetch */
+  /** Timestamp (ms) when the call connected */
   callStartedAt?: number | null;
 };
 
@@ -111,7 +107,6 @@ export function LiveCallRoom({
   remoteWaitingDescription,
   onLeave,
   onBack,
-  onConnected,
   tokenRefresher,
   infoContent,
   infoLabel = "Details",
@@ -125,8 +120,6 @@ export function LiveCallRoom({
 }: LiveCallRoomProps) {
   const room = useRoomContext();
 
-  // Prevent device screen from sleeping during calls (mobile)
-  useWakeLock();
   const connectionState = useConnectionState();
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send, isSending } = useChat();
@@ -193,71 +186,9 @@ export function LiveCallRoom({
   const chatBootstrappedRef = useRef(false);
   const chatMessageCountRef = useRef(0);
   const chromeHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // Tracks whether the remote participant ever joined this session
   const hasHadRemoteRef = useRef(false);
-  // Fires onConnected exactly once when the room first reaches Connected
-  const connectedOnceRef = useRef(false);
-
-  // ── 1. Publish manual tracks exactly once when Connected ──
-  useEffect(() => {
-    if (
-      connectionState === ConnectionState.Connected &&
-      !connectedOnceRef.current
-    ) {
-      connectedOnceRef.current = true;
-      onConnected?.();
-    }
-  }, [connectionState, onConnected]);
-
-  useEffect(() => {
-    if (connectionState === ConnectionState.Connected && localParticipant) {
-      if (mediaManager.videoTrack && !localParticipant.getTrackPublication(Track.Source.Camera)) {
-        localParticipant.publishTrack(mediaManager.videoTrack, { source: Track.Source.Camera })
-          .catch(e => logEvent("publish_failed", { error: String(e), type: "video" }));
-      }
-      if (mediaManager.audioTrack && !localParticipant.getTrackPublication(Track.Source.Microphone)) {
-        localParticipant.publishTrack(mediaManager.audioTrack, { source: Track.Source.Microphone })
-          .catch(e => logEvent("publish_failed", { error: String(e), type: "audio" }));
-      }
-    }
-  }, [connectionState, localParticipant]);
-
-  // ── 2. Connection timeout — disconnect after 45 s if stuck Connecting ──
-  useEffect(() => {
-    if (connectionState === ConnectionState.Connecting) {
-      if (!connectTimeoutRef.current) {
-        connectTimeoutRef.current = setTimeout(() => {
-          room.disconnect();
-        }, 45_000);
-      }
-    } else {
-      if (connectTimeoutRef.current) {
-        clearTimeout(connectTimeoutRef.current);
-        connectTimeoutRef.current = null;
-      }
-    }
-    return () => {
-      if (connectTimeoutRef.current) {
-        clearTimeout(connectTimeoutRef.current);
-        connectTimeoutRef.current = null;
-      }
-    };
-  }, [connectionState, room]);
-
-  // ── 3. Token refresh — NOT needed with current architecture ──
-  // With TTL = 7200s (2 hours), the original JWT covers the entire consultation.
-  // livekit-client@2.x has no room.setToken() API. The only way to inject a new
-  // token is by changing the `token` prop on <LiveKitRoom>, which triggers
-  // room.connect() — a FULL WebRTC teardown + ICE restart. This would cause
-  // audio/video freezes every refresh cycle and is worse than no refresh at all.
-  // The JWT is only used for signaling (WebSocket); once the WebRTC peer
-  // connection is established, media flows independently. If the signaling
-  // WebSocket drops, the SDK reconnects using the original token (still valid
-  // for up to 2 hours). No proactive refresh is needed.
-
-  // ── 4. Force chrome visible during Reconnecting on mobile ──
+  // ── Force chrome visible during Reconnecting on mobile ──
   useEffect(() => {
     if (
       connectionState === ConnectionState.Reconnecting ||
@@ -266,28 +197,6 @@ export function LiveCallRoom({
       setMobileChromeVisible(true);
     }
   }, [connectionState]);
-
-  // ── Safety net: disconnect room and stop all media tracks on unmount ──
-  // Prevents ghost participants when navigating away with disconnectOnPageLeave: false
-  useEffect(() => {
-    return () => {
-      try {
-        room.disconnect(true);
-      } catch {
-        // room may already be disconnected
-      }
-      // Release MediaManager singleton tracks so the next call starts fresh
-      mediaManager.cleanup();
-      // Belt-and-suspenders: stop any lingering hardware tracks
-      document.querySelectorAll("video, audio").forEach((el) => {
-        const media = el as HTMLMediaElement;
-        if (media.srcObject instanceof MediaStream) {
-          media.srcObject.getTracks().forEach((t) => t.stop());
-          media.srcObject = null;
-        }
-      });
-    };
-  }, [room]);
 
 
   // ── 6. Track whether remote ever connected and play sound ──
@@ -456,17 +365,7 @@ export function LiveCallRoom({
 
   async function toggleCamera() {
     try {
-      if (mediaManager.videoTrack) {
-        if (isCameraEnabled) {
-          mediaManager.videoTrack.mute();
-          await localParticipant.setCameraEnabled(false);
-        } else {
-          mediaManager.videoTrack.unmute();
-          await localParticipant.setCameraEnabled(true);
-        }
-      } else {
-        await localParticipant.setCameraEnabled(!isCameraEnabled);
-      }
+      await localParticipant.setCameraEnabled(!isCameraEnabled);
     } catch (error) {
       notifyError("Camera update failed", getMediaDeviceErrorMessage(error));
     }
@@ -498,20 +397,10 @@ export function LiveCallRoom({
 
   async function toggleMic() {
     try {
-      if (mediaManager.audioTrack) {
-        if (isMicrophoneEnabled) {
-          mediaManager.audioTrack.mute();
-          await localParticipant.setMicrophoneEnabled(false);
-        } else {
-          mediaManager.audioTrack.unmute();
-          await localParticipant.setMicrophoneEnabled(true);
-        }
-      } else {
-        await localParticipant.setMicrophoneEnabled(
-          !isMicrophoneEnabled,
-          !isMicrophoneEnabled ? LIVEKIT_AUDIO_CAPTURE_OPTIONS : undefined,
-        );
-      }
+      await localParticipant.setMicrophoneEnabled(
+        !isMicrophoneEnabled,
+        !isMicrophoneEnabled ? LIVEKIT_AUDIO_CAPTURE_OPTIONS : undefined,
+      );
     } catch (error) {
       notifyError("Microphone update failed", getMediaDeviceErrorMessage(error));
     }
@@ -529,9 +418,19 @@ export function LiveCallRoom({
     if (!canSwitchCamera) return;
     setSwitchingCamera(true);
     try {
-      await mediaManager.flipCamera(room);
-      const currentFacingMode = mediaManager.videoTrack?.mediaStreamTrack.getSettings().facingMode as CameraFacingMode;
-      if (currentFacingMode) onFacingModeChange?.(currentFacingMode);
+      const activeTrack = Array.from(localParticipant.videoTrackPublications.values())
+        .map(pub => pub.track)
+        .find(track => track !== undefined);
+      const currentDeviceId = activeTrack?.mediaStreamTrack.getSettings().deviceId;
+      
+      const currentFacingMode = (activeTrack?.mediaStreamTrack.getSettings().facingMode || preferredFacingMode || 'user') as CameraFacingMode;
+      const nextFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+      
+      const nextDevice = getPreferredCameraDevice(videoDevices, nextFacingMode as CameraFacingMode, currentDeviceId);
+      if (nextDevice) {
+        await room.switchActiveDevice("videoinput", nextDevice.deviceId);
+        onFacingModeChange?.(nextFacingMode as CameraFacingMode);
+      }
     } catch (error) {
       notifyError("Camera switch failed", getMediaDeviceErrorMessage(error));
     } finally {
@@ -799,16 +698,9 @@ export function LiveCallRoom({
 
           {/* ── Reconnecting overlay ────────────────────────── */}
           {isReconnecting && (
-            <div className="absolute inset-0 z-25 flex items-center justify-center bg-black/60 backdrop-blur-[2px]">
-              <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/[0.08] bg-[#1a1a1f]/95 px-7 py-6 text-center shadow-2xl">
-                <Loader2 className="h-7 w-7 animate-spin text-white/60" />
-                <p className="text-sm font-semibold text-white">
-                  Reconnecting…
-                </p>
-                <p className="text-xs text-white/40">
-                  Your call will resume shortly
-                </p>
-              </div>
+            <div className="absolute top-4 right-4 z-30 flex items-center gap-2 rounded-full bg-amber-500/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-md">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Reconnecting...
             </div>
           )}
 

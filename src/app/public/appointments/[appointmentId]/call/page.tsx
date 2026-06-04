@@ -1,18 +1,17 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LiveKitRoom, LocalUserChoices } from "@livekit/components-react";
+import dynamic from "next/dynamic";
+import Image from "next/image";
+import { RoomContext, LocalUserChoices } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { CheckCircle2, Loader2, User } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { CustomPreJoin } from "@/components/call/custom-pre-join";
 
 import { getApiError, getRateLimitDescription, isNetworkError, isRateLimitError } from "@/lib/api";
-import { LIVEKIT_ROOM_OPTIONS } from "@/lib/media";
 import { notifyError, notifyInfo } from "@/lib/notify";
 import {
   createPublicAccessSession,
@@ -26,6 +25,8 @@ import { LiveCallRoom } from "@/components/call/live-call-room";
 import { Button } from "@/components/ui/button";
 import type { PublicAppointment } from "@/types/public";
 import type { VideoTokenResponse } from "@/types/doctor";
+import { useCallStore } from "@/stores/call-store";
+import { callSession } from "@/lib/call-session";
 
 const PATIENT_VIDEO_JOIN_EARLY_MINUTES = 10;
 
@@ -43,45 +44,25 @@ function PublicCallPageClient() {
   const params = useParams<{ appointmentId: string }>();
   const queryClient = useQueryClient();
   const appointmentId = params.appointmentId;
-  const joinInFlightRef = useRef(false);
-  const refreshInFlightRef = useRef(false);
   const isMountedRef = useRef(true);
 
-  // Keep screen awake during consultation
-  useWakeLock();
-
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  // Safety net: stop all camera/mic tracks when this page unmounts
-  useEffect(() => {
-    return () => {
-      document.querySelectorAll("video, audio").forEach((el) => {
-        const media = el as HTMLMediaElement;
-        if (media.srcObject instanceof MediaStream) {
-          media.srcObject.getTracks().forEach((t) => t.stop());
-          media.srcObject = null;
-        }
-      });
-    };
-  }, []);
-
+  const { room, uiPhase, callStartedAt } = useCallStore();
+  const [joining, setJoining] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [accessReady, setAccessReady] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
-  const [tokenData, setTokenData] = useState<VideoTokenResponse | null>(null);
-  const [mediaPreferences, setMediaPreferences] = useState<{audio: boolean; video: boolean}>({
-    audio: true,
-    video: true,
-  });
-  const [joining, setJoining] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
-  const [callEnded, setCallEnded] = useState(false);
-  const callEndedRef = useRef(false);
-  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  // Keep screen awake during consultation
+  useWakeLock(uiPhase === "incall" || uiPhase === "reconnecting");
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    useCallStore.getState().reset();
+    return () => {
+      isMountedRef.current = false;
+      void callSession.destroy();
+    };
+  }, []);
 
   // Bootstrap access token
   useEffect(() => {
@@ -120,11 +101,11 @@ function PublicCallPageClient() {
     [appointment, nowMs],
   );
 
-  // keepAlive prevents disconnect on mobile tab switch during active calls.
+  // SSE stream
   useEventStream({
     path: `/public/events/stream/${appointmentId}`,
     enabled: accessReady && !accessError && Boolean(appointmentId),
-    keepAlive: Boolean(tokenData),
+    keepAlive: uiPhase === "incall" || uiPhase === "reconnecting",
     onEvent: {
       call_state_changed: () => {
         queryClient.invalidateQueries({ queryKey: ["public-appointment-call", appointmentId] });
@@ -141,27 +122,14 @@ function PublicCallPageClient() {
     },
   });
 
-  // Polling fallback to detect status drift if SSE drops
-  useEffect(() => {
-    if (!tokenData) return;
-    const interval = setInterval(() => {
-      queryClient.invalidateQueries({ queryKey: ["public-appointment-call", appointmentId] });
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [appointmentId, tokenData, queryClient]);
-
   const joinCall = useCallback(
     async (values: LocalUserChoices) => {
-      if (joinInFlightRef.current) return;
+      if (uiPhase !== "prejoin" || callSession.getRoom()) return;
 
-      joinInFlightRef.current = true;
       setJoining(true);
-      setJoinError(null);
-
       try {
         if (appointment?.scheduled_at && joinWindow?.tooEarly) {
           const earlyMessage = formatEarlyJoinDescription(appointment.scheduled_at, joinWindow.opensAt);
-          setJoinError(earlyMessage);
           notifyInfo("Call not open yet", earlyMessage);
           return;
         }
@@ -171,79 +139,56 @@ function PublicCallPageClient() {
           {},
         );
         if (isMountedRef.current) {
-          setTokenData(data);
-          setMediaPreferences({
-            audio: values.audioEnabled,
-            video: values.videoEnabled,
-          });
+          sessionStorage.setItem("activeCallChoices", JSON.stringify({ audioEnabled: values.audioEnabled, videoEnabled: values.videoEnabled }));
+          await callSession.connect(data.server_url, data.token, appointmentId, "public", tokenRefresher);
+          await callSession.publishTracks(values.audioEnabled, values.videoEnabled);
         }
       } catch (error) {
         const apiMessage = getApiError(error);
-        setJoinError(apiMessage);
         notifyError("Couldn't join call", apiMessage);
       } finally {
-        joinInFlightRef.current = false;
         if (isMountedRef.current) {
           setJoining(false);
         }
       }
     },
-    [appointment, appointmentId, joinWindow],
+    [appointment, appointmentId, joinWindow, uiPhase],
   );
 
   // Disconnect room if appointment status becomes "ended"
   useEffect(() => {
-    if (callEnded) return;
-    if (appointment?.call_status === "ended") {
-      callEndedRef.current = true;
-      setTokenData(null);
-      setCallEnded(true);
+    if (appointment?.call_status === "ended" && room) {
+      void callSession.disconnect();
     }
-  }, [appointment?.call_status, callEnded]);
+  }, [appointment?.call_status, room]);
 
-  const handleDisconnect = useCallback((reason?: unknown) => {
-    // Don't show "connection dropped" if the call was intentionally ended
-    if (callEndedRef.current) return;
-    const reasonStr = String(reason);
-    if (["server_shutdown", "room_deleted", "user_rejected", "UNKNOWN_REASON"].some(r => reasonStr.includes(r))) {
-      setTokenData(null);
-      setCallStartedAt(null);
-      setJoinError("Connection dropped. Please click Join to re-enter the consultation.");
-    } else {
-      setTokenData(null);
-      setCallStartedAt(null);
-    }
-  }, []);
-
-  const handleMediaDeviceFailure = useCallback(
-    (_failure?: unknown, kind?: string) => {
-      const message =
-        kind === "audioinput"
-          ? "Microphone access failed. You can stay in the call muted."
-          : "Camera access failed. You can stay in the call without video.";
-      setJoinError(message);
-      notifyError("Media access issue", message);
-    },
-    [],
-  );
-
-  const tokenRefresher = useCallback(async () => {
-    if (refreshInFlightRef.current) {
-      throw new Error("Token refresh already in progress");
-    }
-    refreshInFlightRef.current = true;
+  const tokenRefresher = useCallback(async (reason?: string) => {
     try {
       const { data } = await publicApi.post<VideoTokenResponse>(
         `/public/appointments/${appointmentId}/video-token`,
-        {},
+        { recovery_reason: reason },
       );
       return data.token;
-    } finally {
-      if (isMountedRef.current) {
-        refreshInFlightRef.current = false;
-      }
+    } catch (e) {
+      throw new Error("Token refresh failed: " + String(e));
     }
   }, [appointmentId]);
+
+  // Auto-resume call after page refresh
+  useEffect(() => {
+    if (uiPhase === "prejoin") {
+      const activeCallId = sessionStorage.getItem("activeCallId");
+      const choicesRaw = sessionStorage.getItem("activeCallChoices");
+      if (activeCallId === appointmentId && choicesRaw) {
+        try {
+          const choices = JSON.parse(choicesRaw);
+          void joinCall(choices);
+        } catch (e) {
+          console.error("Failed to parse auto-resume choices", e);
+        }
+      }
+    }
+  }, [appointmentId, uiPhase, joinCall]);
 
   const canJoin = Boolean(
     appointment &&
@@ -253,9 +198,7 @@ function PublicCallPageClient() {
       appointment.call_status !== "ended",
   );
 
-  const isDoctorConnected = appointment?.call_status === "waiting" || appointment?.call_status === "connected";
-
-  // Update nowMs periodically for join-window countdown display only
+  // Update nowMs periodically for join-window display
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(timer);
@@ -319,8 +262,7 @@ function PublicCallPageClient() {
     );
   }
 
-  // Already ended
-  if (appointment.call_status === "ended" || callEnded) {
+  if (appointment.call_status === "ended" || uiPhase === "ended") {
     return <ConsultationEnded duration={appointment.duration_min} doctorName={appointment.doctor_name || undefined} />;
   }
 
@@ -333,62 +275,39 @@ function PublicCallPageClient() {
     );
   }
 
-  if (joinError && !tokenData && !joining) {
-    return (
-      <CallState
-        title="Could not join call"
-        description={joinError}
-        action={
-          <div className="mt-6 flex w-full flex-col gap-3 sm:max-w-xs mx-auto">
-            <Button className="rounded-xl w-full bg-brand text-white hover:bg-brand/90" onClick={() => {
-              setJoinError(null);
-            }}>
-              Try again
-            </Button>
-          </div>
-        }
-      />
-    );
-  }
-
-  // Unified Render with Fake Instant Join Handoff
   return (
     <div className="relative h-screen bg-[#111113] flex flex-col" data-lk-theme="default">
-      {/* 1. Lobby (PreJoin) - Acquires hardware locks seamlessly BEFORE joining. Stays mounted with a blur until connected. */}
-      {(!tokenData || !callStartedAt) && (
+      {/* 1. Lobby (PreJoin) */}
+      {uiPhase === "prejoin" && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#060B14]">
           <CustomPreJoin
             onSubmit={joinCall}
             patientName={appointment?.patient_name || "Patient"}
-            isJoining={joining || !!tokenData}
+            isJoining={joining}
             otherPartyWaiting={appointment?.call_status === "waiting"}
           />
         </div>
       )}
 
-      {/* 2. Active Call — mounts WebRTC in the background, auto-acquires nothing */}
-      {tokenData && (
-        <LiveKitRoom
-          key={appointmentId}
-          serverUrl={tokenData.server_url}
-          token={tokenData.token}
-          connect={true}
-          audio={false}
-          video={false}
-          options={LIVEKIT_ROOM_OPTIONS}
-          className="h-full w-full"
-          onDisconnected={handleDisconnect}
-          onMediaDeviceFailure={handleMediaDeviceFailure}
-        >
+      {/* 2. Connecting State */}
+      {uiPhase === "connecting" && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#060B14] text-white">
+          <Loader2 className="h-10 w-10 animate-spin text-brand mb-4" />
+          <p className="text-sm font-medium text-white/60 animate-pulse">Connecting to call...</p>
+        </div>
+      )}
+
+      {/* 3. Active Call */}
+      {room && (uiPhase === "incall" || uiPhase === "reconnecting") && (
+        <RoomContext.Provider value={room}>
           <LiveCallRoom
             title={appointment.doctor_name ?? "Doctor"}
             subtitle={`${format(parseISO(appointment.scheduled_at), "hh:mm a")} · Consultation`}
             remoteLabel={appointment.doctor_name ?? "Doctor"}
             remoteWaitingTitle={`Waiting for Dr. ${(appointment.doctor_name ?? "Doctor").split(" ").pop()}`}
             remoteWaitingDescription="You're in the consultation room. The doctor will appear here as soon as they join."
-            onLeave={() => setTokenData(null)}
-            onBack={() => setTokenData(null)}
-            onConnected={() => setCallStartedAt(Date.now())}
+            onLeave={() => void callSession.disconnect()}
+            onBack={() => void callSession.disconnect()}
             tokenRefresher={tokenRefresher}
             endLabel="Leave call"
             callStartedAt={callStartedAt}
@@ -414,7 +333,7 @@ function PublicCallPageClient() {
               </div>
             }
           />
-        </LiveKitRoom>
+        </RoomContext.Provider>
       )}
     </div>
   );
