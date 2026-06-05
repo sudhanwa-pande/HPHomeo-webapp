@@ -27,6 +27,9 @@ import type { PublicAppointment } from "@/types/public";
 import type { VideoTokenResponse } from "@/types/doctor";
 import { useCallStore } from "@/stores/call-store";
 import { callSession } from "@/lib/call-session";
+import type { CameraFacingMode } from "@/lib/media";
+import type { LocalVideoTrack, LocalAudioTrack } from "livekit-client";
+import { logEvent } from "@/lib/logger";
 
 const PATIENT_VIDEO_JOIN_EARLY_MINUTES = 10;
 
@@ -46,14 +49,23 @@ function PublicCallPageClient() {
   const appointmentId = params.appointmentId;
   const isMountedRef = useRef(true);
 
-  const { room, uiPhase, callStartedAt } = useCallStore();
+  const { room, callState, callStartedAt } = useCallStore();
   const [joining, setJoining] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [accessReady, setAccessReady] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [preferredFacingMode, setPreferredFacingMode] = useState<CameraFacingMode>("user");
+
+  const showPreview = callState === "idle" || callState === "preview_ready";
+  const showSpinner = callState === "connecting" || callState === "connected" || callState === "publishing";
+  const showCall = callState === "incall" || callState === "reconnecting";
+  const showEnded = callState === "ended";
+
+  const joinInFlightRef = useRef(false);
+  const autoResumedRef = useRef(false);
 
   // Keep screen awake during consultation
-  useWakeLock(uiPhase === "incall" || uiPhase === "reconnecting");
+  useWakeLock(showCall);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -105,7 +117,7 @@ function PublicCallPageClient() {
   useEventStream({
     path: `/public/events/stream/${appointmentId}`,
     enabled: accessReady && !accessError && Boolean(appointmentId),
-    keepAlive: uiPhase === "incall" || uiPhase === "reconnecting",
+    keepAlive: showCall,
     onEvent: {
       call_state_changed: () => {
         queryClient.invalidateQueries({ queryKey: ["public-appointment-call", appointmentId] });
@@ -122,11 +134,38 @@ function PublicCallPageClient() {
     },
   });
 
-  const joinCall = useCallback(
-    async (values: LocalUserChoices) => {
-      if (uiPhase !== "prejoin" || callSession.getRoom()) return;
+  const tokenRefresher = useCallback(async (reason?: string, options?: { signal?: AbortSignal }) => {
+    try {
+      const { data } = await publicApi.post<VideoTokenResponse>(
+        `/public/appointments/${appointmentId}/video-token`,
+        { recovery_reason: reason, session_id: callSession.getSessionId() },
+        { signal: options?.signal }
+      );
+      if (data.epoch !== undefined) {
+        callSession.updateEpoch(data.epoch);
+      }
+      if (data.session_id && data.session_id !== callSession.getSessionId()) {
+        await callSession.destroy();
+        callSession.resetSessionId(data.session_id);
+      }
+      return data.token;
+    } catch (e) {
+      throw new Error("Token refresh failed: " + String(e));
+    }
+  }, [appointmentId]);
 
+  const joinCall = useCallback(
+    async (values: LocalUserChoices, localTracks?: { videoTrack?: LocalVideoTrack; audioTrack?: LocalAudioTrack }) => {
+      if (joinInFlightRef.current || callSession.getRoom()) return;
+
+      const currentCallState = useCallStore.getState().callState;
+      if (currentCallState !== "idle" && currentCallState !== "preview_ready") return;
+
+      joinInFlightRef.current = true;
       setJoining(true);
+
+      logEvent("JOIN_CLICKED", { role: "public", values });
+
       try {
         if (appointment?.scheduled_at && joinWindow?.tooEarly) {
           const earlyMessage = formatEarlyJoinDescription(appointment.scheduled_at, joinWindow.opensAt);
@@ -136,23 +175,47 @@ function PublicCallPageClient() {
 
         const { data } = await publicApi.post<VideoTokenResponse>(
           `/public/appointments/${appointmentId}/video-token`,
-          {},
+          { session_id: callSession.getSessionId() },
         );
+        
+        if (data.epoch !== undefined) {
+          callSession.updateEpoch(data.epoch);
+        }
+        if (data.session_id && data.session_id !== callSession.getSessionId()) {
+          await callSession.destroy();
+          callSession.resetSessionId(data.session_id);
+        }
+
         if (isMountedRef.current) {
-          sessionStorage.setItem("activeCallChoices", JSON.stringify({ audioEnabled: values.audioEnabled, videoEnabled: values.videoEnabled }));
+          sessionStorage.setItem("activeCallChoices", JSON.stringify({ 
+            audioEnabled: values.audioEnabled, 
+            videoEnabled: values.videoEnabled,
+            videoDeviceId: values.videoDeviceId,
+            audioDeviceId: values.audioDeviceId
+          }));
+          
+          logEvent("CONNECT_START", { role: "public" });
           await callSession.connect(data.server_url, data.token, appointmentId, "public", tokenRefresher);
-          await callSession.publishTracks(values.audioEnabled, values.videoEnabled);
+          await callSession.publishTracks(
+            values.audioEnabled,
+            values.videoEnabled,
+            preferredFacingMode,
+            values.videoDeviceId,
+            values.audioDeviceId,
+            localTracks
+          );
         }
       } catch (error) {
         const apiMessage = getApiError(error);
         notifyError("Couldn't join call", apiMessage);
       } finally {
+        joinInFlightRef.current = false;
         if (isMountedRef.current) {
           setJoining(false);
         }
       }
     },
-    [appointment, appointmentId, joinWindow, uiPhase],
+    [appointment, appointmentId, joinWindow, preferredFacingMode, tokenRefresher],
   );
 
   // Disconnect room if appointment status becomes "ended"
@@ -162,24 +225,15 @@ function PublicCallPageClient() {
     }
   }, [appointment?.call_status, room]);
 
-  const tokenRefresher = useCallback(async (reason?: string) => {
-    try {
-      const { data } = await publicApi.post<VideoTokenResponse>(
-        `/public/appointments/${appointmentId}/video-token`,
-        { recovery_reason: reason },
-      );
-      return data.token;
-    } catch (e) {
-      throw new Error("Token refresh failed: " + String(e));
-    }
-  }, [appointmentId]);
-
   // Auto-resume call after page refresh
   useEffect(() => {
-    if (uiPhase === "prejoin") {
+    if (autoResumedRef.current) return;
+    const currentCallState = useCallStore.getState().callState;
+    if (currentCallState === "idle" || currentCallState === "preview_ready") {
       const activeCallId = sessionStorage.getItem("activeCallId");
       const choicesRaw = sessionStorage.getItem("activeCallChoices");
       if (activeCallId === appointmentId && choicesRaw) {
+        autoResumedRef.current = true;
         try {
           const choices = JSON.parse(choicesRaw);
           void joinCall(choices);
@@ -188,7 +242,7 @@ function PublicCallPageClient() {
         }
       }
     }
-  }, [appointmentId, uiPhase, joinCall]);
+  }, [appointmentId, joinCall]);
 
   const canJoin = Boolean(
     appointment &&
@@ -207,7 +261,7 @@ function PublicCallPageClient() {
   // ── Loading ───────────────────────────────────────────────────────
   if (!accessReady || appointmentQuery.isLoading) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#060B14]">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-overlay">
         <div className="relative">
           <div className="absolute inset-0 rounded-full bg-brand/20 blur-2xl" />
           <Loader2 className="relative h-7 w-7 animate-spin text-brand" />
@@ -262,7 +316,7 @@ function PublicCallPageClient() {
     );
   }
 
-  if (appointment.call_status === "ended" || uiPhase === "ended") {
+  if (appointment.call_status === "ended" || showEnded) {
     return <ConsultationEnded duration={appointment.duration_min} doctorName={appointment.doctor_name || undefined} />;
   }
 
@@ -276,13 +330,13 @@ function PublicCallPageClient() {
   }
 
   return (
-    <div className="relative h-screen bg-[#111113] flex flex-col" data-lk-theme="default">
+    <div className="relative h-screen bg-app-bg flex flex-col" data-lk-theme="default">
       {/* 1. Lobby (PreJoin) */}
-      {uiPhase === "prejoin" && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#060B14]">
+      {showPreview && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-start sm:justify-center overflow-y-auto bg-overlay py-6 px-4">
           <CustomPreJoin
             onSubmit={joinCall}
-            patientName={appointment?.patient_name || "Patient"}
+            userName={appointment?.patient_name || "Patient"}
             isJoining={joining}
             otherPartyWaiting={appointment?.call_status === "waiting"}
           />
@@ -290,15 +344,15 @@ function PublicCallPageClient() {
       )}
 
       {/* 2. Connecting State */}
-      {uiPhase === "connecting" && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#060B14] text-white">
+      {showSpinner && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-overlay text-white">
           <Loader2 className="h-10 w-10 animate-spin text-brand mb-4" />
           <p className="text-sm font-medium text-white/60 animate-pulse">Connecting to call...</p>
         </div>
       )}
 
       {/* 3. Active Call */}
-      {room && (uiPhase === "incall" || uiPhase === "reconnecting") && (
+      {room && showCall && (
         <RoomContext.Provider value={room}>
           <LiveCallRoom
             title={appointment.doctor_name ?? "Doctor"}
@@ -311,6 +365,9 @@ function PublicCallPageClient() {
             tokenRefresher={tokenRefresher}
             endLabel="Leave call"
             callStartedAt={callStartedAt}
+            allowCameraSwitch
+            preferredFacingMode={preferredFacingMode}
+            onFacingModeChange={setPreferredFacingMode}
             infoLabel="Appointment details"
             infoContent={
               <div className="space-y-3 rounded-xl bg-white/6 p-4 text-sm text-white">
@@ -341,20 +398,25 @@ function PublicCallPageClient() {
 
 function ConsultationEnded({ duration, doctorName }: { duration?: number; doctorName?: string }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#060B14] px-6">
-      <div className="w-full max-w-lg rounded-3xl border border-white/5 bg-white/5 px-8 py-10 text-center shadow-2xl backdrop-blur-xl">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/20">
-          <CheckCircle2 className="h-8 w-8 text-emerald-400" />
+    <div className="flex min-h-screen items-center justify-center bg-overlay px-6 relative overflow-hidden">
+      {/* Background Lighting Layer */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(88,155,255,0.06),transparent_50%)] animate-pulse" />
+      <div className="absolute -left-20 -top-20 h-72 w-72 rounded-full bg-brand/5 blur-[120px] pointer-events-none" />
+      <div className="absolute -right-20 -bottom-20 h-72 w-72 rounded-full bg-brand/5 blur-[120px] pointer-events-none" />
+
+      <div className="relative w-full max-w-lg rounded-3xl border border-call-border bg-panel px-8 py-10 text-center shadow-2xl backdrop-blur-xl z-10">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-state-live/10 border border-state-live/20">
+          <CheckCircle2 className="h-8 w-8 text-state-live" />
         </div>
         <p className="mt-6 text-xl font-bold text-white/90">Consultation Ended</p>
         
-        <div className="mt-6 text-sm text-white/70 bg-white/5 rounded-2xl p-6 border border-white/10 text-left space-y-4">
-          <div className="flex justify-between items-center border-b border-white/10 pb-3">
+        <div className="mt-6 text-sm text-white/70 bg-app-bg rounded-2xl p-6 border border-call-border text-left space-y-4 shadow-inner">
+          <div className="flex justify-between items-center border-b border-call-border pb-3">
             <span className="text-white/40 font-medium">Doctor</span>
             <span className="font-semibold text-white/90">{doctorName ? `Dr. ${doctorName}` : "Your Doctor"}</span>
           </div>
           {duration && (
-            <div className="flex justify-between items-center border-b border-white/10 pb-3">
+            <div className="flex justify-between items-center border-b border-call-border pb-3">
               <span className="text-white/40 font-medium">Scheduled Duration</span>
               <span className="font-semibold text-white/90">{duration} min</span>
             </div>
@@ -384,8 +446,13 @@ function CallState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#060B14] px-6">
-      <div className="w-full max-w-lg rounded-3xl border border-white/5 bg-white/5 px-8 py-10 text-center shadow-2xl backdrop-blur-xl">
+    <div className="flex min-h-screen items-center justify-center bg-overlay px-6 relative overflow-hidden">
+      {/* Background Lighting Layer */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(88,155,255,0.06),transparent_50%)]" />
+      <div className="absolute -left-20 -top-20 h-72 w-72 rounded-full bg-brand/5 blur-[120px] pointer-events-none" />
+      <div className="absolute -right-20 -bottom-20 h-72 w-72 rounded-full bg-brand/5 blur-[120px] pointer-events-none" />
+
+      <div className="relative w-full max-w-lg rounded-3xl border border-call-border bg-panel px-8 py-10 text-center shadow-2xl backdrop-blur-xl z-10">
         <Image
           src="/images/logo.svg"
           alt="eHomeo"

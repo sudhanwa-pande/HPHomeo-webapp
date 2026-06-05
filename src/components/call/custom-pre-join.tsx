@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Camera, CameraOff, Mic, MicOff, Video } from "lucide-react";
+import { Camera, CameraOff, Mic, MicOff } from "lucide-react";
 import type { LocalUserChoices } from "@livekit/components-react";
+import { createLocalVideoTrack, createLocalAudioTrack, LocalVideoTrack, LocalAudioTrack } from "livekit-client";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -16,16 +17,27 @@ import { hapticTap } from "@/lib/haptics";
 import { logEvent } from "@/lib/logger";
 
 interface CustomPreJoinProps {
-  onSubmit: (values: LocalUserChoices) => void;
-  patientName?: string;
+  onSubmit: (
+    values: LocalUserChoices,
+    localTracks?: { videoTrack?: LocalVideoTrack; audioTrack?: LocalAudioTrack }
+  ) => void;
+  userName?: string;
   isJoining?: boolean;
   otherPartyWaiting?: boolean;
 }
 
-export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = false, otherPartyWaiting = false }: CustomPreJoinProps) {
+export function CustomPreJoin({
+  onSubmit,
+  userName = "Guest",
+  isJoining = false,
+  otherPartyWaiting = false,
+}: CustomPreJoinProps) {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+  
+  const [localVideoTrack, setLocalVideoTrack] = useState<LocalVideoTrack | null>(null);
+  const [localAudioTrack, setLocalAudioTrack] = useState<LocalAudioTrack | null>(null);
+  
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -34,6 +46,10 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
   const [selectedVideoDevice, setSelectedVideoDevice] = useState<string>("");
   const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>("");
 
+  const videoTrackRef = useRef<LocalVideoTrack | null>(null);
+  const audioTrackRef = useRef<LocalAudioTrack | null>(null);
+
+  // Fetch device list
   useEffect(() => {
     async function getDevices() {
       try {
@@ -48,87 +64,152 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
     return () => navigator.mediaDevices.removeEventListener("devicechange", getDevices);
   }, []);
 
+  // Video track lifecycle
   useEffect(() => {
-    let mounted = true;
-    let activeStream: MediaStream | null = null;
+    let active = true;
+    let createdTrack: LocalVideoTrack | null = null;
 
-    const initMedia = async () => {
+    async function updateVideoTrack() {
+      if (!videoEnabled) {
+        if (videoTrackRef.current) {
+          videoTrackRef.current.stop();
+          videoTrackRef.current = null;
+        }
+        setLocalVideoTrack(null);
+        return;
+      }
+
       try {
         setIsLoading(true);
         setError(null);
+        
+        if (videoTrackRef.current) {
+          videoTrackRef.current.stop();
+        }
 
-        const constraints: MediaStreamConstraints = {
-          video: videoEnabled
-            ? {
-                deviceId: selectedVideoDevice ? { exact: selectedVideoDevice } : undefined,
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              }
-            : false,
-          audio: audioEnabled
-            ? {
-                deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined,
-              }
-            : false,
-        };
+        createdTrack = await createLocalVideoTrack({
+          deviceId: selectedVideoDevice || undefined,
+        });
 
-        if (constraints.video || constraints.audio) {
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
-          if (mounted) {
-            activeStream = stream;
-            setPreviewStream(stream);
-            
-            const vTrack = stream.getVideoTracks()[0];
-            const aTrack = stream.getAudioTracks()[0];
-            if (vTrack && !selectedVideoDevice) {
-              setSelectedVideoDevice(vTrack.getSettings().deviceId || "");
-            }
-            if (aTrack && !selectedAudioDevice) {
-              setSelectedAudioDevice(aTrack.getSettings().deviceId || "");
-            }
-          } else {
-            stream.getTracks().forEach((track) => track.stop());
+        if (active) {
+          videoTrackRef.current = createdTrack;
+          setLocalVideoTrack(createdTrack);
+          
+          const actualDeviceId = createdTrack.mediaStreamTrack.getSettings().deviceId;
+          if (actualDeviceId && actualDeviceId !== selectedVideoDevice) {
+            setSelectedVideoDevice(actualDeviceId);
           }
+          
+          logEvent("PREVIEW_READY", { type: "video", deviceId: actualDeviceId });
         } else {
-          if (mounted) {
-            setPreviewStream(null);
-          }
+          createdTrack.stop();
         }
       } catch (err: any) {
-        if (mounted) {
-          logEvent("prejoin_media_error", { error: String(err) });
+        if (active) {
+          logEvent("prejoin_media_error", { type: "video", error: String(err) });
           if (err?.name === "NotReadableError") {
-            setError("Camera is in use by another application. Please close other apps using the camera and try again.");
+            setError("Camera is in use by another application. Please close other apps using the camera.");
           } else if (err?.name === "NotAllowedError") {
-            setError("Camera or microphone permission was denied. Please allow access in your browser settings.");
+            setError("Camera access permission was denied.");
           } else {
-            setError("Failed to access camera or microphone.");
+            setError("Failed to access camera.");
           }
           setVideoEnabled(false);
+          setLocalVideoTrack(null);
         }
       } finally {
-        if (mounted) {
+        if (active) {
           setIsLoading(false);
         }
       }
-    };
+    }
 
-    initMedia();
-
+    updateVideoTrack();
     return () => {
-      mounted = false;
-      if (activeStream) {
-        activeStream.getTracks().forEach((track) => track.stop());
+      active = false;
+      if (createdTrack) {
+        createdTrack.stop();
       }
     };
-  }, [videoEnabled, audioEnabled, selectedVideoDevice, selectedAudioDevice]);
+  }, [videoEnabled, selectedVideoDevice]);
 
-  // Attach stream to video tag
+  // Audio track lifecycle
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.srcObject = previewStream;
+    let active = true;
+    let createdTrack: LocalAudioTrack | null = null;
+
+    async function updateAudioTrack() {
+      if (!audioEnabled) {
+        if (audioTrackRef.current) {
+          audioTrackRef.current.stop();
+          audioTrackRef.current = null;
+        }
+        setLocalAudioTrack(null);
+        return;
+      }
+
+      try {
+        if (audioTrackRef.current) {
+          audioTrackRef.current.stop();
+        }
+
+        createdTrack = await createLocalAudioTrack({
+          deviceId: selectedAudioDevice || undefined,
+        });
+
+        if (active) {
+          audioTrackRef.current = createdTrack;
+          setLocalAudioTrack(createdTrack);
+          
+          const actualDeviceId = createdTrack.mediaStreamTrack.getSettings().deviceId;
+          if (actualDeviceId && actualDeviceId !== selectedAudioDevice) {
+            setSelectedAudioDevice(actualDeviceId);
+          }
+
+          logEvent("PREVIEW_READY", { type: "audio", deviceId: actualDeviceId });
+        } else {
+          createdTrack.stop();
+        }
+      } catch (err: any) {
+        if (active) {
+          logEvent("prejoin_media_error", { type: "audio", error: String(err) });
+          setAudioEnabled(false);
+          setLocalAudioTrack(null);
+        }
+      }
     }
-  }, [previewStream]);
+
+    updateAudioTrack();
+    return () => {
+      active = false;
+      if (createdTrack) {
+        createdTrack.stop();
+      }
+    };
+  }, [audioEnabled, selectedAudioDevice]);
+
+  // Attach local video track to video tag
+  useEffect(() => {
+    const el = videoRef.current;
+    if (el && localVideoTrack) {
+      localVideoTrack.attach(el);
+      return () => {
+        localVideoTrack.detach(el);
+      };
+    }
+  }, [localVideoTrack]);
+
+  // General unmount cleanup (if user exits/navigates away without submitting)
+  useEffect(() => {
+    return () => {
+      if (videoTrackRef.current) {
+        videoTrackRef.current.stop();
+      }
+      if (audioTrackRef.current) {
+        audioTrackRef.current.stop();
+      }
+    };
+  }, []);
 
   const handleDeviceChange = (kind: "videoinput" | "audioinput", deviceId: string) => {
     if (kind === "videoinput") {
@@ -142,30 +223,40 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
     if (isJoining) return;
     hapticTap();
     
-    // Stop the preview tracks before calling onSubmit to release resources
-    if (previewStream) {
-      previewStream.getTracks().forEach((track) => track.stop());
-      setPreviewStream(null);
-    }
+    const videoTrack = videoTrackRef.current || undefined;
+    const audioTrack = audioTrackRef.current || undefined;
 
-    onSubmit({
-      videoEnabled,
-      audioEnabled,
-      videoDeviceId: selectedVideoDevice,
-      audioDeviceId: selectedAudioDevice,
-      username: patientName,
-    });
+    // Clear reference from pre-join component so the unmount hook does NOT stop them
+    videoTrackRef.current = null;
+    audioTrackRef.current = null;
+
+    onSubmit(
+      {
+        videoEnabled,
+        audioEnabled,
+        videoDeviceId: selectedVideoDevice,
+        audioDeviceId: selectedAudioDevice,
+        username: userName,
+      },
+      {
+        videoTrack,
+        audioTrack,
+      }
+    );
   };
 
+  const videoDevices = devices.filter((d) => d.kind === "videoinput");
+  const audioDevices = devices.filter((d) => d.kind === "audioinput");
+
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center p-4 sm:p-6 sm:px-12 bg-[#060B14]">
-      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-12 gap-8 items-center h-full sm:h-auto">
+    <div className="flex h-full w-full flex-col items-center justify-center p-4 sm:p-6 sm:px-12 bg-overlay">
+      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-12 gap-8 items-center h-full sm:h-auto text-white">
         {/* Left side: Video Preview */}
         <div className="md:col-span-8 flex flex-col h-full sm:h-auto justify-center relative">
-          <div className="relative aspect-[3/4] sm:aspect-video w-full overflow-hidden rounded-[2rem] bg-[#111113] border border-white/5 shadow-[0_32px_64px_rgba(0,0,0,0.4)]">
+          <div className="relative aspect-[3/4] sm:aspect-video w-full overflow-hidden rounded-[2rem] bg-app-bg border border-call-border shadow-[0_32px_64px_rgba(0,0,0,0.4)]">
             
-            {isLoading ? (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#111113]">
+            {isLoading && videoEnabled ? (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-app-bg">
                 <div className="flex flex-col items-center gap-4">
                   <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand border-t-transparent" />
                   <p className="text-sm font-medium text-white/60 animate-pulse">Requesting camera access...</p>
@@ -173,7 +264,6 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
               </div>
             ) : null}
 
-            {/* Blur Overlay */}
             {isJoining && (
               <div className="absolute inset-0 z-40 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center transition-all duration-300">
                 <div className="flex gap-4 mb-4">
@@ -191,7 +281,7 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
               </div>
             )}
 
-            {videoEnabled && previewStream && !error ? (
+            {videoEnabled && localVideoTrack && !error ? (
               <video
                 ref={videoRef}
                 autoPlay
@@ -213,7 +303,6 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
                     <Button variant="ghost" size="sm" onClick={() => {
                         setVideoEnabled(false);
                         setAudioEnabled(true);
-                        onSubmit({ videoEnabled: false, audioEnabled: true, videoDeviceId: selectedVideoDevice, audioDeviceId: selectedAudioDevice, username: patientName });
                     }} className="mt-2 w-full text-white/70 hover:text-white hover:bg-white/10 rounded-xl">
                       <Mic className="mr-2 h-4 w-4" /> Join with audio only
                     </Button>
@@ -224,9 +313,8 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
               </div>
             )}
 
-            {/* Floating Badge */}
             <div className="absolute bottom-6 left-6 rounded-full bg-black/40 px-4 py-2 text-sm font-semibold text-white/90 backdrop-blur-md border border-white/10 shadow-xl z-30">
-              {patientName} (You)
+              {userName} (You)
             </div>
 
             {otherPartyWaiting && (
@@ -236,7 +324,6 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
               </div>
             )}
             
-            {/* Embedded Mobile Toggles */}
             <div className="absolute bottom-6 right-6 flex gap-3 md:hidden z-30">
               <button
                 type="button"
@@ -249,6 +336,7 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
                     : "bg-red-500/90 text-white hover:bg-red-500 border-red-500/50",
                   isJoining && "opacity-50 pointer-events-none"
                 )}
+                aria-label={audioEnabled ? "Mute microphone" : "Unmute microphone"}
               >
                 {audioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
               </button>
@@ -263,6 +351,7 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
                     : "bg-red-500/90 text-white hover:bg-red-500 border-red-500/50",
                   isJoining && "opacity-50 pointer-events-none"
                 )}
+                aria-label={videoEnabled ? "Turn camera off" : "Turn camera on"}
               >
                 {videoEnabled ? <Camera className="h-5 w-5" /> : <CameraOff className="h-5 w-5" />}
               </button>
@@ -271,91 +360,108 @@ export function CustomPreJoin({ onSubmit, patientName = "Guest", isJoining = fal
         </div>
 
         {/* Right side: Controls & Join */}
-        <div className="md:col-span-4 flex w-full flex-col space-y-6 pb-8 md:pb-0 z-10">
-          <div className="space-y-2 text-center md:text-left">
-            <h1 className="text-2xl font-bold text-white sm:text-3xl">Ready to join?</h1>
-            <p className="text-sm text-white/50">Configure your devices before entering the consultation.</p>
+        <div className="md:col-span-4 flex flex-col justify-center space-y-6">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl font-display">Ready to join?</h1>
+            <p className="text-sm text-white/45">Review your settings before joining the secure medical consultation.</p>
           </div>
 
-          <div className="hidden md:flex flex-col gap-3 rounded-[1.5rem] bg-white/[0.03] p-5 border border-white/[0.08] shadow-lg backdrop-blur-sm">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-white/80">Microphone</span>
-                <button
-                  disabled={isJoining}
-                  onClick={() => setAudioEnabled(!audioEnabled)}
-                  className={cn(
-                    "relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-black",
-                    audioEnabled ? "bg-brand" : "bg-white/20",
-                    isJoining && "opacity-50 pointer-events-none"
-                  )}
+          <div className="space-y-4 rounded-[2rem] border border-white/[0.06] bg-white/[0.02] p-6 backdrop-blur-md">
+            {/* Camera Select */}
+            {videoEnabled && videoDevices.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-white/35">Camera</label>
+                <Select
+                  value={selectedVideoDevice}
+                  onValueChange={(val) => { if (val) handleDeviceChange("videoinput", val); }}
                 >
-                  <span
-                    className={cn(
-                      "pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                      audioEnabled ? "translate-x-5" : "translate-x-0"
-                    )}
-                  />
-                </button>
+                  <SelectTrigger className="h-12 w-full rounded-2xl border-white/[0.08] bg-white/[0.03] text-sm text-white/80 hover:bg-white/[0.06] hover:text-white transition">
+                    <SelectValue placeholder="Select Camera" />
+                  </SelectTrigger>
+                  <SelectContent className="border-call-border bg-panel text-white rounded-2xl">
+                    {videoDevices.map((device) => (
+                      <SelectItem key={device.deviceId} value={device.deviceId} className="rounded-xl hover:bg-white/5 cursor-pointer">
+                        {device.label || `Camera ${device.deviceId.slice(0, 5)}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <Select disabled={isJoining} value={selectedAudioDevice} onValueChange={(val) => { if (val) handleDeviceChange("audioinput", val); }}>
-                <SelectTrigger className="w-full h-8 text-xs bg-white/5 border-white/10 text-white">
-                  <SelectValue placeholder="Select Microphone" />
-                </SelectTrigger>
-                <SelectContent className="bg-[#161618] border-white/10 text-white">
-                  {devices.filter(d => d.kind === "audioinput").map(device => (
-                    <SelectItem key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${device.deviceId.slice(0, 5)}`}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="h-px w-full bg-white/5 my-1" />
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-white/80">Camera</span>
-                <button
-                  disabled={isJoining}
-                  onClick={() => setVideoEnabled(!videoEnabled)}
-                  className={cn(
-                    "relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-black",
-                    videoEnabled ? "bg-brand" : "bg-white/20",
-                    isJoining && "opacity-50 pointer-events-none"
-                  )}
+            )}
+
+            {/* Mic Select */}
+            {audioEnabled && audioDevices.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-white/35">Microphone</label>
+                <Select
+                  value={selectedAudioDevice}
+                  onValueChange={(val) => { if (val) handleDeviceChange("audioinput", val); }}
                 >
-                  <span
-                    className={cn(
-                      "pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                      videoEnabled ? "translate-x-5" : "translate-x-0"
-                    )}
-                  />
-                </button>
+                  <SelectTrigger className="h-12 w-full rounded-2xl border-white/[0.08] bg-white/[0.03] text-sm text-white/80 hover:bg-white/[0.06] hover:text-white transition">
+                    <SelectValue placeholder="Select Microphone" />
+                  </SelectTrigger>
+                  <SelectContent className="border-call-border bg-panel text-white rounded-2xl">
+                    {audioDevices.map((device) => (
+                      <SelectItem key={device.deviceId} value={device.deviceId} className="rounded-xl hover:bg-white/5 cursor-pointer">
+                        {device.label || `Microphone ${device.deviceId.slice(0, 5)}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <Select disabled={isJoining} value={selectedVideoDevice} onValueChange={(val) => { if (val) handleDeviceChange("videoinput", val); }}>
-                <SelectTrigger className="w-full h-8 text-xs bg-white/5 border-white/10 text-white">
-                  <SelectValue placeholder="Select Camera" />
-                </SelectTrigger>
-                <SelectContent className="bg-[#161618] border-white/10 text-white">
-                  {devices.filter(d => d.kind === "videoinput").map(device => (
-                    <SelectItem key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${device.deviceId.slice(0, 5)}`}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            )}
+
+            {/* Hardware Controls */}
+            <div className="hidden md:flex items-center gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAudioEnabled(!audioEnabled)}
+                disabled={isJoining}
+                className={cn(
+                  "h-12 flex-1 rounded-2xl border-white/[0.08] text-sm transition-all duration-200 active:scale-95 cursor-pointer",
+                  audioEnabled 
+                    ? "bg-white/[0.03] text-white hover:bg-white/[0.08] hover:text-white" 
+                    : "bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20 hover:text-red-400"
+                )}
+              >
+                {audioEnabled ? <Mic className="mr-2 h-4 w-4 text-white/50" /> : <MicOff className="mr-2 h-4 w-4" />}
+                {audioEnabled ? "Mic On" : "Mic Off"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setVideoEnabled(!videoEnabled)}
+                disabled={isJoining}
+                className={cn(
+                  "h-12 flex-1 rounded-2xl border-white/[0.08] text-sm transition-all duration-200 active:scale-95 cursor-pointer",
+                  videoEnabled 
+                    ? "bg-white/[0.03] text-white hover:bg-white/[0.08] hover:text-white" 
+                    : "bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20 hover:text-red-400"
+                )}
+              >
+                {videoEnabled ? <Camera className="mr-2 h-4 w-4 text-white/50" /> : <CameraOff className="mr-2 h-4 w-4" />}
+                {videoEnabled ? "Camera On" : "Camera Off"}
+              </Button>
             </div>
           </div>
 
           <Button
-            size="lg"
-            disabled={isLoading || isJoining}
-            className="w-full h-14 rounded-[1.2rem] bg-brand text-base font-bold text-white shadow-[0_8px_32px_rgba(88,155,255,0.3)] hover:bg-brand/90 hover:shadow-[0_12px_40px_rgba(88,155,255,0.4)] transition-all active:scale-[0.98] disabled:opacity-70"
             onClick={handleSubmit}
+            disabled={isJoining || isLoading}
+            className="h-14 w-full rounded-2xl bg-brand text-base font-bold text-white shadow-medium hover:bg-brand/90 hover:shadow-xl active:scale-[0.98] transition-all cursor-pointer"
           >
-            <Video className="mr-2 h-5 w-5" />
-            {isJoining ? "Joining..." : "Join Consultation"}
+            {isJoining ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Joining...
+              </span>
+            ) : (
+              "Join Consultation"
+            )}
           </Button>
         </div>
       </div>
     </div>
   );
 }
-
-

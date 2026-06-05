@@ -7,9 +7,8 @@ import * as Sentry from "@sentry/nextjs";
 type LogPayload = Record<string, unknown>;
 
 export function logEvent(eventName: string, payload?: LogPayload) {
-  if (process.env.NODE_ENV === "development") {
-    console.log(`[TELEMETRY] ${eventName}`, payload);
-  }
+  const timestamp = new Date().toISOString();
+  console.log(`[TELEMETRY][${timestamp}] ${eventName}`, JSON.stringify(payload || {}));
   
   Sentry.captureMessage(`Telemetry: ${eventName}`, {
     level: "info",

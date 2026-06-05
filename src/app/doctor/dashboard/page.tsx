@@ -385,13 +385,13 @@ function DashboardContent() {
           {statsLoading || todayAppointmentsLoading || visitFlowLoading ? (
             <SkeletonStatRow />
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+             <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
               <StatCard
                 icon={CalendarIcon}
                 label="Today"
                 value={todayAppointmentCount}
                 helper="appointments"
-                iconBg="bg-brand/10"
+                iconBg="bg-gradient-to-br from-brand/10 to-brand/20"
                 iconColor="text-brand"
               />
               <StatCard
@@ -399,7 +399,7 @@ function DashboardContent() {
                 label="Upcoming 7d"
                 value={upcomingSevenCount}
                 helper="confirmed"
-                iconBg="bg-brand-accent/25"
+                iconBg="bg-gradient-to-br from-brand-accent/15 to-brand-accent/30"
                 iconColor="text-brand-dark"
               />
               <StatCard
@@ -407,7 +407,7 @@ function DashboardContent() {
                 label="Total"
                 value={stats?.total_appointments ?? 0}
                 helper="all time"
-                iconBg="bg-violet-50"
+                iconBg="bg-gradient-to-br from-violet-50 to-violet-100/70"
                 iconColor="text-violet-600"
               />
               <StatCard
@@ -415,7 +415,7 @@ function DashboardContent() {
                 label="Revenue (30d)"
                 value={formatCurrency(stats?.paid_revenue_30d ?? 0)}
                 helper="online payments"
-                iconBg="bg-emerald-50"
+                iconBg="bg-gradient-to-br from-emerald-50 to-emerald-100/70"
                 iconColor="text-emerald-600"
               />
             </div>
@@ -495,13 +495,13 @@ function DashboardContent() {
                   <button
                     key={day.toISOString()}
                     onClick={() => setSelectedDate(day)}
-                    className={`relative flex aspect-square w-full items-center justify-center rounded-lg text-[11px] font-semibold transition-all ${
+                    className={`interactive relative flex aspect-square w-full items-center justify-center rounded-lg text-[11px] font-semibold transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.95] ${
                       isSelected
                         ? "bg-brand text-white shadow-md shadow-brand/30"
                         : isToday
                           ? "bg-white text-brand ring-1 ring-brand/20 shadow-sm"
                           : hasAppt
-                            ? "bg-white/80 text-brand-dark hover:bg-white"
+                            ? "bg-white/80 text-brand-dark hover:bg-white/95 border border-brand/10"
                             : isCurrentMonth
                               ? "text-brand-ink-soft hover:bg-white hover:text-brand-dark"
                               : "text-brand-subtext/40 hover:bg-white/50 hover:text-brand-dark"
@@ -788,21 +788,49 @@ function PatientsChart({
         <ResponsiveContainer width="100%" height="100%">
           {mode === "status" ? (
             <BarChart data={chartData as VisitStatusPoint[]} barCategoryGap="32%" maxBarSize={44}>
+              <defs>
+                <linearGradient id="confirmedGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#93C5FD" stopOpacity={1} />
+                  <stop offset="100%" stopColor="#60A5FA" stopOpacity={0.8} />
+                </linearGradient>
+                <linearGradient id="completedGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3B82F6" stopOpacity={1} />
+                  <stop offset="100%" stopColor="#1D4ED8" stopOpacity={0.8} />
+                </linearGradient>
+                <linearGradient id="cancelledGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#E2E8F0" stopOpacity={1} />
+                  <stop offset="100%" stopColor="#94A3B8" stopOpacity={0.8} />
+                </linearGradient>
+                <linearGradient id="noShowGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#CBD5E1" stopOpacity={1} />
+                  <stop offset="100%" stopColor="#64748B" stopOpacity={0.8} />
+                </linearGradient>
+              </defs>
               <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#9CA3AF" }} dy={6} />
               <Tooltip content={<VisitTooltip />} cursor={{ fill: "rgba(88,155,255,0.05)", radius: [6, 6, 0, 0] as unknown as number }} />
               <Bar dataKey="value" name="Appointments" radius={[7, 7, 3, 3]}>
-                {(chartData as VisitStatusPoint[]).map((entry) => (
-                  <Cell key={entry.label} fill={entry.fill} />
-                ))}
+                {(chartData as VisitStatusPoint[]).map((entry) => {
+                  let fill = "url(#confirmedGrad)";
+                  if (entry.label === "Completed") fill = "url(#completedGrad)";
+                  if (entry.label === "Cancelled") fill = "url(#cancelledGrad)";
+                  if (entry.label === "No Show") fill = "url(#noShowGrad)";
+                  return <Cell key={entry.label} fill={fill} />;
+                })}
               </Bar>
             </BarChart>
           ) : (
             <BarChart data={chartData as VisitLoadPoint[]} barCategoryGap="35%" maxBarSize={44}>
+              <defs>
+                <linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#589BFF" stopOpacity={1} />
+                  <stop offset="100%" stopColor="#2563EB" stopOpacity={0.8} />
+                </linearGradient>
+              </defs>
               <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#9CA3AF" }} dy={6} />
               <Tooltip content={<VisitTooltip />} cursor={{ fill: "rgba(88,155,255,0.05)", radius: [6, 6, 0, 0] as unknown as number }} />
               <Bar dataKey="visits" name="Visits" radius={[7, 7, 3, 3]}>
                 {(chartData as VisitLoadPoint[]).map((entry) => (
-                  <Cell key={entry.label} fill={entry.visits > 0 ? "#589BFF" : "#E5EAF3"} />
+                  <Cell key={entry.label} fill={entry.visits > 0 ? "url(#loadGrad)" : "#E5EAF3"} />
                 ))}
               </Bar>
             </BarChart>
@@ -1002,11 +1030,17 @@ function IncomeChart({
           <ResponsiveContainer width="100%" height="100%">
             {range === "1" ? (
               <BarChart data={chartData} barCategoryGap="30%" maxBarSize={52}>
+                <defs>
+                  <linearGradient id="barIncomeGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#8B5CF6" stopOpacity={1} />
+                    <stop offset="100%" stopColor="#6D28D9" stopOpacity={0.8} />
+                  </linearGradient>
+                </defs>
                 <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#9CA3AF" }} dy={6} />
                 <Tooltip content={<RevenueTooltip />} cursor={{ fill: "rgba(139,92,246,0.05)", radius: [6, 6, 0, 0] as unknown as number }} />
                 <Bar dataKey="revenue" name="Revenue" radius={[8, 8, 3, 3]}>
                   {(chartData as RevenueTrendPoint[]).map((entry, i) => (
-                    <Cell key={i} fill={entry.revenue > 0 ? "#8B5CF6" : "#EDE9FE"} />
+                    <Cell key={i} fill={entry.revenue > 0 ? "url(#barIncomeGrad)" : "#EDE9FE"} />
                   ))}
                 </Bar>
               </BarChart>

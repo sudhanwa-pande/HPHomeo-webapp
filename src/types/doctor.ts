@@ -229,6 +229,8 @@ export interface VideoTokenResponse {
   server_url: string;
   room: string;
   token: string;
+  session_id?: string;
+  epoch?: number;
 }
 
 // Call status type (shared across all appointment types)

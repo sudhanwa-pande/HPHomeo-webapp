@@ -86,12 +86,18 @@ function InfoItem({
   value: string;
 }) {
   return (
-    <div className="rounded-xl bg-gray-50 p-3 ring-1 ring-gray-100">
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500/60">
-        <Icon className="h-3 w-3" />
-        {label}
+    <div className="interactive rounded-2xl border border-white/50 bg-white/40 backdrop-blur-sm p-4 flex flex-col justify-between hover:bg-white/80 hover:border-brand/20 shadow-sm transition-all duration-200 group cursor-pointer">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold tracking-widest uppercase text-gray-400/80">
+          {label}
+        </span>
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand/5 text-brand group-hover:bg-brand/10 transition-colors">
+          <Icon className="h-3.5 w-3.5" />
+        </div>
       </div>
-      <p className="mt-1.5 text-sm font-semibold text-gray-900">{value}</p>
+      <p className="mt-4 text-sm font-semibold tracking-tight text-gray-900 group-hover:text-brand transition-colors">
+        {value}
+      </p>
     </div>
   );
 }
@@ -221,27 +227,28 @@ function AppointmentDetailContent() {
           variant="ghost"
           size="sm"
           onClick={() => router.push("/patient/appointments")}
-          className="gap-1"
+          className="gap-1.5 text-gray-500 hover:text-gray-955 hover:bg-gray-100/50 rounded-xl transition-all duration-200 active:scale-95 cursor-pointer"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
+          <ArrowLeft className="h-4 w-4" />
           Back
         </Button>
       }
     >
-      <div className="mx-auto max-w-3xl space-y-4">
+      <div className="mx-auto max-w-3xl space-y-5 px-1 py-2 sm:py-4">
         {/* ═══ Status Header + Action Bar ═══ */}
-        <div
-          className={`overflow-hidden rounded-2xl border ${statusStyle.border} ${statusStyle.bg}`}
-        >
-          <div className="p-5">
+        <div className="relative overflow-hidden rounded-[2rem] border border-white/50 bg-white/70 backdrop-blur-md shadow-[0_24px_50px_-12px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.9)]">
+          {/* Spotlight Ambient Lighting */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(88,155,255,0.04),transparent_60%)] pointer-events-none" />
+
+          <div className="relative z-10 p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               {/* Left: Doctor + appointment info */}
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[1.2rem] bg-gradient-to-br from-white to-gray-50 shadow-sm ring-1 ring-black/5">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand/5 border border-brand/10 shadow-sm text-brand">
                   {apt.mode === "online" ? (
-                    <MonitorPlay className="h-6 w-6 text-brand" />
+                    <MonitorPlay className="h-6 w-6" />
                   ) : (
-                    <MapPin className="h-6 w-6 text-gray-500" />
+                    <MapPin className="h-6 w-6" />
                   )}
                 </div>
                 <div>
@@ -254,11 +261,14 @@ function AppointmentDetailContent() {
                       #{shortId}
                     </span>
                   </div>
-                  <p className="mt-1 text-base font-bold text-gray-900">
+                  <p className="mt-1 text-base font-bold text-gray-900 font-display">
                     {apt.doctor_name}
                   </p>
-                  <p className="mt-0.5 text-sm text-gray-500">
-                    {formatDateLong(apt.scheduled_at)} at{" "}
+                  <p className="mt-1.5 text-xs text-gray-500 flex items-center gap-1.5 font-medium">
+                    <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                    {formatDateLong(apt.scheduled_at)}
+                    <span className="text-gray-300">·</span>
+                    <Clock className="h-3.5 w-3.5 text-gray-400" />
                     {formatTime(apt.scheduled_at)}
                   </p>
                 </div>
@@ -267,53 +277,55 @@ function AppointmentDetailContent() {
               {/* Right: Consolidated action buttons */}
               <div className="flex flex-wrap items-center gap-2">
                 {joinable && (
-                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                    <Button
-                      onClick={() =>
-                        router.push(
-                          `/patient/appointments/${apt.appointment_id}/waiting-room`,
-                        )
-                      }
-                      className="h-11 gap-2 rounded-xl bg-emerald-500 px-6 font-semibold text-white shadow-[0_8px_24px_rgba(16,185,129,0.3)] hover:bg-emerald-600"
-                    >
+                  <Button
+                    onClick={() =>
+                      router.push(
+                        `/patient/appointments/${apt.appointment_id}/waiting-room`,
+                      )
+                    }
+                    className="interactive relative overflow-hidden group gap-2 h-11 bg-emerald-600 text-white font-bold rounded-xl shadow-[0_8px_24px_rgba(16,185,129,0.25)] transition-all duration-200 cursor-pointer"
+                  >
+                    <span className="relative z-10 flex items-center gap-2">
                       <Video className="h-4 w-4" />
                       Join Call
-                    </Button>
-                  </motion.div>
+                    </span>
+                    <span className="absolute inset-0 bg-gradient-to-r from-emerald-600 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  </Button>
                 )}
                 {needsPay && (
                   <Button
                     onClick={() => actions.paymentMutation.mutate(apt)}
                     disabled={actions.paymentMutation.isPending}
-                    className="gap-1.5 rounded-xl"
+                    className="interactive relative overflow-hidden group gap-2 h-11 bg-brand text-white font-bold rounded-xl shadow-[0_8px_24px_rgba(88,155,255,0.25)] transition-all duration-200 cursor-pointer"
                   >
-                    {actions.paymentMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <CreditCard className="h-4 w-4" />
-                    )}
-                    Complete Payment
+                    <span className="relative z-10 flex items-center gap-2">
+                      {actions.paymentMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CreditCard className="h-4 w-4" />
+                      )}
+                      Complete Payment
+                    </span>
+                    <span className="absolute inset-0 bg-gradient-to-r from-brand to-brand-accent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                   </Button>
                 )}
                 {reschedulable && (
                   <Button
                     variant="outline"
-                    size="sm"
-                    className="gap-1.5 rounded-xl"
+                    className="interactive gap-1.5 h-11 border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl cursor-pointer"
                     onClick={() => actions.openReschedule(apt.appointment_id)}
                   >
-                    <CalendarClock className="h-3.5 w-3.5" />
+                    <CalendarClock className="h-4 w-4" />
                     Reschedule
                   </Button>
                 )}
                 {cancellable && (
                   <Button
                     variant="outline"
-                    size="sm"
-                    className="gap-1.5 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                    className="interactive gap-1.5 h-11 border-red-200 text-red-600 hover:bg-red-50/80 font-semibold rounded-xl cursor-pointer"
                     onClick={() => actions.openCancel(apt.appointment_id)}
                   >
-                    <XCircle className="h-3.5 w-3.5" />
+                    <XCircle className="h-4 w-4" />
                     Cancel
                   </Button>
                 )}
@@ -322,19 +334,24 @@ function AppointmentDetailContent() {
           </div>
 
           {/* Fee + payment strip */}
-          <div className="flex items-center justify-between border-t border-gray-100 bg-white/40 px-5 py-2.5">
+          <div className="relative z-10 flex items-center justify-between border-t border-gray-100/60 bg-white/40 px-6 py-3.5">
             <div className="flex items-center gap-4 text-xs text-gray-500">
-              <span className="flex items-center gap-1">
-                <IndianRupee className="h-3 w-3" />
-                {apt.consultation_fee > 0
-                  ? `₹${apt.consultation_fee}`
-                  : "Free"}
+              <span className="flex items-center gap-1.5 font-medium">
+                <div className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-600">
+                  <IndianRupee className="h-3 w-3" />
+                </div>
+                {apt.consultation_fee > 0 ? `₹${apt.consultation_fee}` : "Free"}
               </span>
-              <span className="flex items-center gap-1">
-                <CreditCard className="h-3 w-3" />
+              <span className="flex items-center gap-1.5 font-medium">
+                <div className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-600">
+                  <CreditCard className="h-3 w-3" />
+                </div>
                 {PAYMENT_LABELS[apt.payment_status] || apt.payment_status}
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1.5 font-medium">
+                <div className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-600">
+                  <ClipboardList className="h-3 w-3" />
+                </div>
                 {apt.appointment_type === "follow_up" ? "Follow-up" : "New consultation"}
               </span>
             </div>
@@ -342,7 +359,7 @@ function AppointmentDetailContent() {
               onClick={() => {
                 navigator.clipboard.writeText(apt.appointment_id);
               }}
-              className="flex items-center gap-1 text-[11px] text-gray-400 transition-colors hover:text-gray-600"
+              className="flex items-center gap-1 text-[11px] font-semibold text-gray-400 transition-colors hover:text-gray-700 cursor-pointer"
               title="Copy appointment ID"
             >
               <Copy className="h-3 w-3" />
@@ -354,24 +371,22 @@ function AppointmentDetailContent() {
         {/* Refund status */}
         {refundInfo && (
           <div
-            className={`rounded-2xl border ${refundInfo.border} ${refundInfo.bg} p-4`}
+            className={`rounded-2xl border ${refundInfo.border} ${refundInfo.bg} p-4 shadow-sm backdrop-blur-sm`}
           >
             <div className="flex items-start gap-3">
-              <Clock
-                className={`mt-0.5 h-5 w-5 shrink-0 ${refundInfo.text} ${refundInfo.spinning ? "animate-spin" : ""}`}
-              />
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/90 border border-white/50 shadow-sm text-brand-dark">
+                <Clock className={`h-4 w-4 ${refundInfo.spinning ? "animate-spin" : ""}`} />
+              </div>
               <div className="flex-1">
                 <p className={`text-sm font-bold ${refundInfo.text}`}>
                   {refundInfo.label}
                 </p>
-                <p
-                  className={`mt-0.5 text-xs ${refundInfo.text} opacity-80`}
-                >
+                <p className={`mt-0.5 text-xs ${refundInfo.text} opacity-80`}>
                   {refundInfo.desc}
                 </p>
               </div>
               {apt.consultation_fee > 0 && (
-                <p className={`text-lg font-bold ${refundInfo.text}`}>
+                <p className={`text-lg font-bold ${refundInfo.text} font-mono`}>
                   ₹{apt.consultation_fee}
                 </p>
               )}
@@ -380,7 +395,7 @@ function AppointmentDetailContent() {
         )}
 
         {/* ═══ Tab Navigation ═══ */}
-        <div className="relative flex w-full max-w-md gap-1 rounded-[1.2rem] bg-gray-100/80 p-1.5 backdrop-blur-md">
+        <div className="relative flex w-full max-w-md gap-1 rounded-2xl border border-white/50 bg-white/50 p-1 backdrop-blur-md shadow-sm">
           {tabs.map((t) => {
             const isActive = activeTab === t.key;
             return (
@@ -388,14 +403,14 @@ function AppointmentDetailContent() {
                 key={t.key}
                 onClick={() => setActiveTab(t.key)}
                 className={cn(
-                  "relative flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors z-10",
-                  isActive ? "text-gray-900" : "text-gray-500 hover:text-gray-700"
+                  "relative flex-1 rounded-xl px-3 py-2 text-xs sm:text-sm font-bold tracking-tight transition-colors z-10 cursor-pointer",
+                  isActive ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
                 )}
               >
                 {isActive && (
                   <motion.div
                     layoutId="activePatientTab"
-                    className="absolute inset-0 -z-10 rounded-xl bg-white shadow-sm"
+                    className="absolute inset-0 -z-10 rounded-xl bg-white shadow-sm border border-gray-100"
                     transition={{ type: "spring", stiffness: 350, damping: 30 }}
                   />
                 )}
@@ -410,24 +425,27 @@ function AppointmentDetailContent() {
           {activeTab === "overview" && (
             <motion.div key="overview" {...tabFade} className="space-y-4">
               {/* Doctor Info Card */}
-              <DoctorInfoCard
-                doctor={{
-                  name: apt.doctor_name,
-                  photo: doctorProfile?.profile_photo,
-                  specialization: doctorProfile?.specialization,
-                  city: doctorProfile?.city,
-                  clinic_name: doctorProfile?.clinic_name,
-                  doctor_id: apt.doctor_id,
-                }}
-                showViewProfile
-                onViewProfile={() =>
-                  router.push(`/patient/doctors/${apt.doctor_id}`)
-                }
-              />
+              <div className="interactive cursor-pointer">
+                <DoctorInfoCard
+                  doctor={{
+                    name: apt.doctor_name,
+                    photo: doctorProfile?.profile_photo,
+                    specialization: doctorProfile?.specialization,
+                    city: doctorProfile?.city,
+                    clinic_name: doctorProfile?.clinic_name,
+                    doctor_id: apt.doctor_id,
+                  }}
+                  showViewProfile
+                  onViewProfile={() =>
+                    router.push(`/patient/doctors/${apt.doctor_id}`)
+                  }
+                  className="!bg-white/40 !backdrop-blur-sm !border-white/50 shadow-sm hover:!bg-white/70"
+                />
+              </div>
 
               {/* Details grid */}
-              <div className="rounded-2xl border border-gray-200/60 bg-white p-5">
-                <h3 className="mb-4 text-sm font-semibold text-gray-900">
+              <div className="rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm p-5 shadow-sm">
+                <h3 className="mb-4 text-sm font-bold tracking-tight text-gray-900 font-display">
                   Appointment Information
                 </h3>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -540,7 +558,7 @@ function AppointmentDetailContent() {
                             `/patient/book/${apt.doctor_id}?followUp=${apt.appointment_id}`,
                           )
                         }
-                        className="rounded-xl bg-violet-600 hover:bg-violet-700"
+                        className="rounded-xl bg-violet-600 hover:bg-violet-700 cursor-pointer transition-all active:scale-95"
                       >
                         Book
                       </Button>
@@ -577,7 +595,7 @@ function AppointmentDetailContent() {
               {apt.status !== "completed" &&
                 apt.payment_status !== "paid" &&
                 apt.payment_status !== "refunded" && (
-                  <div className="flex flex-col items-center rounded-2xl border border-dashed border-gray-200/60 bg-gray-50/30 py-14 text-center">
+                  <div className="flex flex-col items-center rounded-2xl border border-dashed border-gray-200/60 bg-white/40 py-14 text-center backdrop-blur-sm">
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
                       <FileText className="h-5 w-5 text-gray-300" />
                     </div>
@@ -604,11 +622,11 @@ function AppointmentDetailContent() {
           {activeTab === "activity" && (
             <motion.div key="activity" {...tabFade} className="space-y-4">
               {/* Appointment Timeline */}
-              <div className="rounded-2xl border border-gray-200/60 bg-white p-5">
-                <h3 className="mb-4 text-sm font-semibold text-gray-900">
+              <div className="rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm p-5 shadow-sm">
+                <h3 className="mb-4 text-sm font-bold tracking-tight text-gray-900 font-display">
                   Appointment Journey
                 </h3>
-                <AppointmentTimeline appointment={apt} />
+                <AppointmentTimeline appointment={apt} className="!border-none !bg-transparent !p-0 !shadow-none" />
               </div>
 
               {/* Rate & Review (after completion) */}
@@ -640,43 +658,46 @@ function AppointmentDetailContent() {
           if (!open) actions.closeCancel();
         }}
       >
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-md rounded-[2rem] border border-white/50 bg-white/95 backdrop-blur-md shadow-2xl p-6">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 font-display text-lg font-bold">
               <XCircle className="h-5 w-5 text-red-500" />
               Cancel Appointment
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-xs text-gray-500">
               This action cannot be undone.
               {apt.payment_status === "paid" &&
                 ` A refund of ₹${apt.consultation_fee} will be processed automatically.`}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="rounded-xl bg-gray-50 p-3 text-sm text-gray-900 ring-1 ring-gray-100">
-              <p className="font-semibold">{apt.doctor_name}</p>
-              <p className="text-xs text-gray-500">
-                {formatDateLong(apt.scheduled_at)} at{" "}
+          <div className="space-y-3 mt-3">
+            <div className="rounded-xl border border-white/50 bg-gray-50/50 p-3.5 text-sm text-gray-950">
+              <p className="font-bold">{apt.doctor_name}</p>
+              <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5 font-medium">
+                <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                {formatShortDate(apt.scheduled_at)}
+                <span className="text-gray-300">·</span>
+                <Clock className="h-3.5 w-3.5 text-gray-400" />
                 {formatTime(apt.scheduled_at)}
               </p>
             </div>
             <Input
               value={actions.cancelReason}
               onChange={(e) => actions.setCancelReason(e.target.value)}
-              placeholder="Reason (optional)"
-              className="rounded-xl"
+              placeholder="Reason for cancellation (optional)"
+              className="rounded-xl border-gray-200 bg-white"
             />
           </div>
-          <DialogFooter>
+          <DialogFooter className="mt-6 gap-2">
             <Button
               variant="outline"
               onClick={actions.closeCancel}
-              className="rounded-xl"
+              className="rounded-xl border-gray-200 text-gray-700 font-semibold transition-all duration-200 active:scale-95 cursor-pointer h-10 px-4"
             >
               Keep
             </Button>
             <Button
-              className="rounded-xl bg-red-600 hover:bg-red-700"
+              className="rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold transition-all duration-200 active:scale-95 cursor-pointer h-10 px-4"
               disabled={actions.cancelMutation.isPending}
               onClick={actions.confirmCancel}
             >
@@ -696,20 +717,20 @@ function AppointmentDetailContent() {
           if (!open) actions.closeReschedule();
         }}
       >
-        <DialogContent className="max-w-2xl rounded-2xl p-0 max-h-[90vh] overflow-y-auto">
-          <DialogHeader className="px-6 pt-6">
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="max-w-2xl rounded-[2rem] border border-white/50 bg-white/95 backdrop-blur-md shadow-2xl p-0 overflow-hidden max-h-[90vh] flex flex-col">
+          <DialogHeader className="px-6 pt-6 pb-2">
+            <DialogTitle className="flex items-center gap-2 font-display text-lg font-bold">
               <CalendarClock className="h-5 w-5 text-brand" />
               Reschedule Appointment
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-xs text-gray-500">
               Pick a new date and time slot.
               {apt.payment_status === "paid" &&
                 " Your payment will be transferred automatically."}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="px-6">
+          <div className="px-6 flex-1 overflow-y-auto py-2">
             <SlotPicker
               doctorId={apt.doctor_id}
               selectedDate={new Date()}
@@ -725,15 +746,15 @@ function AppointmentDetailContent() {
               value={actions.rescheduleNote}
               onChange={(e) => actions.setRescheduleNote(e.target.value)}
               placeholder="Note for the clinic (optional)"
-              className="mt-4 rounded-xl"
+              className="mt-4 rounded-xl border-gray-200 bg-white"
             />
           </div>
 
-          <DialogFooter className="px-6 pb-6">
+          <DialogFooter className="px-6 py-4 bg-gray-50/50 border-t border-gray-100 flex gap-2 shrink-0">
             <Button
               variant="outline"
               onClick={actions.closeReschedule}
-              className="rounded-xl"
+              className="rounded-xl border-gray-200 text-gray-700 font-semibold transition-all duration-200 active:scale-95 cursor-pointer h-10 px-4"
             >
               Cancel
             </Button>
@@ -743,7 +764,7 @@ function AppointmentDetailContent() {
                 actions.rescheduleMutation.isPending
               }
               onClick={actions.confirmReschedule}
-              className="gap-1.5 rounded-xl"
+              className="gap-2 rounded-xl bg-brand text-white font-bold transition-all duration-200 active:scale-95 cursor-pointer h-10 px-4 shadow-sm"
             >
               {actions.rescheduleMutation.isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

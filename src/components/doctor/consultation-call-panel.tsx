@@ -33,6 +33,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 
 import api from "@/lib/api";
+import { callSession } from "@/lib/call-session";
 import {
   buildPreferredAudioConstraints,
   buildPreferredVideoConstraints,
@@ -225,6 +226,74 @@ export function ConsultationCallPanel({
     return () => window.removeEventListener("orientationchange", onOrientationChange);
   }, [calculateBounds]);
 
+  // Periodic doctor heartbeat loop when in active call inside ConsultationCallPanel
+  useEffect(() => {
+    if (!tokenData || !tokenData.token) return;
+
+    let sessionVersion: number | null = null;
+    try {
+      const base64Url = tokenData.token.split(".")[1];
+      if (base64Url) {
+        const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+        const jsonPayload = typeof window !== "undefined"
+          ? decodeURIComponent(
+              window.atob(base64)
+                .split("")
+                .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+                .join("")
+            )
+          : Buffer.from(base64, "base64").toString("utf8");
+        const payload = JSON.parse(jsonPayload);
+        if (payload && typeof payload.metadata === "string") {
+          const meta = JSON.parse(payload.metadata);
+          if (typeof meta.session_version === "number") {
+            sessionVersion = meta.session_version;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to extract session version from token:", e);
+    }
+
+    if (sessionVersion === null) return;
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
+    const url = `${baseUrl}/doctor/appointments/${appointmentId}/call/heartbeat`;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const sendHeartbeat = () => {
+      fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ session_version: sessionVersion }),
+        credentials: "include",
+      })
+        .then((res) => {
+          if (!res.ok) {
+            console.warn(`Doctor call panel heartbeat response not OK: ${res.status}`);
+          }
+        })
+        .catch((err) => {
+          console.warn("Doctor call panel heartbeat network error:", err);
+        });
+    };
+
+    const loop = () => {
+      sendHeartbeat();
+      const delay = 5000 + Math.random() * 1000;
+      timerId = setTimeout(loop, delay);
+    };
+
+    // Start heartbeat loop immediately
+    loop();
+
+    return () => {
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [tokenData, appointmentId]);
+
   // Keyboard detection (hybrid with debounce) & Atomic bounds recalculation
   useEffect(() => {
     if (!minimized || typeof window === "undefined") return;
@@ -295,12 +364,20 @@ export function ConsultationCallPanel({
     setJoining(true);
     setJoinError(null);
     try {
-      const prepared = await prepareMediaChoices({ audio: wantsAudio, video: wantsVideo });
+      const prepared = await prepareMediaChoices({ audio: wantsAudio, video: wantsVideo, preferredFacingMode: "user" });
       setMediaPreferences({ audio: prepared.audio, video: prepared.video });
       if (prepared.warning) notifyInfo("Joining with available devices", prepared.warning);
       const { data } = await api.post<VideoTokenResponse>(
         `/doctor/appointments/${appointmentId}/video-token`,
+        { session_id: callSession.getSessionId() }
       );
+      if (data.epoch !== undefined) {
+        callSession.updateEpoch(data.epoch);
+      }
+      if (data.session_id && data.session_id !== callSession.getSessionId()) {
+        await callSession.destroy();
+        callSession.resetSessionId(data.session_id);
+      }
       hapticSuccess();
       setCallEnded(false);
       callEndedRef.current = false;
@@ -409,7 +486,7 @@ export function ConsultationCallPanel({
           token={tokenData.token}
           connect
           audio={buildPreferredAudioConstraints(mediaPreferences.audio)}
-          video={buildPreferredVideoConstraints(mediaPreferences.video)}
+          video={buildPreferredVideoConstraints(mediaPreferences.video, "user")}
           options={LIVEKIT_ROOM_OPTIONS}
           onMediaDeviceFailure={handleMediaDeviceFailure}
           onDisconnected={handleDisconnected}

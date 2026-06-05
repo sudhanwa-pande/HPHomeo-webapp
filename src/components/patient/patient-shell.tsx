@@ -61,7 +61,7 @@ interface PatientShellProps {
   headerRight?: ReactNode;
 }
 
-export function PatientShell({ children, title, headerRight }: PatientShellProps) {
+export function PatientShell({ children, title, subtitle, headerRight }: PatientShellProps) {
   return (
     <SidebarProvider
       style={
@@ -76,7 +76,14 @@ export function PatientShell({ children, title, headerRight }: PatientShellProps
         <header className="sticky top-0 z-30 flex min-h-[52px] items-center justify-between border-b border-border/20 bg-white/90 px-4 backdrop-blur-md sm:px-5 lg:px-6">
           <div className="flex min-w-0 items-center gap-2.5">
             <SidebarTrigger className="-ml-1 text-brand-subtext hover:text-brand-dark" />
-            <h1 className="font-display truncate text-[15px] font-bold tracking-tight text-brand-dark">{title}</h1>
+            <div className="flex flex-col min-w-0">
+              <h1 className="font-display truncate text-[15px] font-bold tracking-tight text-brand-dark">{title}</h1>
+              {subtitle && (
+                <p className="truncate text-[10px] sm:text-[11px] font-medium text-brand-subtext/75 mt-0.5 leading-none">
+                  {subtitle}
+                </p>
+              )}
+            </div>
           </div>
           {headerRight ? (
             <div className="flex items-center gap-2">{headerRight}</div>

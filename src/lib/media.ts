@@ -186,12 +186,24 @@ export async function prepareMediaChoices({
     };
   }
 
-  if (
-    typeof navigator === "undefined" ||
-    !navigator.mediaDevices?.getUserMedia ||
-    (!audio && !video)
-  ) {
-    return { audio, video, warning: null as string | null };
+  // Pre-check if devices exist without opening them to prevent unnecessary hardware locks
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const hasVideoInput = devices.some((d) => d.kind === "videoinput");
+    const hasAudioInput = devices.some((d) => d.kind === "audioinput");
+    
+    if (!hasVideoInput) video = false;
+    if (!hasAudioInput) audio = false;
+    
+    if (!audio && !video) {
+      return {
+        audio: false,
+        video: false,
+        warning: "No camera or microphone detected.",
+      };
+    }
+  } catch (e) {
+    console.warn("Failed to enumerate devices in prepareMediaChoices", e);
   }
 
   const videoConstraints = buildPreferredVideoConstraints(

@@ -157,8 +157,8 @@ export function AppointmentTimeline({
   const steps = deriveSteps(appointment);
 
   return (
-    <div className={cn("rounded-2xl border border-gray-200/60 bg-white p-5", className)}>
-      <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-400">
+    <div className={cn("rounded-2xl border border-white/50 bg-white/40 backdrop-blur-sm p-5 shadow-sm", className)}>
+      <h3 className="mb-4 text-[10px] font-bold tracking-widest uppercase text-gray-400/80">
         Appointment Progress
       </h3>
       <div className="relative">

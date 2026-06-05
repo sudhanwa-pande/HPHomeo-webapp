@@ -1,54 +1,52 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@config "../../tailwind.config.js";
 
 @custom-variant dark (&:is(.dark *));
 
-@theme {
-  /* Brand Colors */
-  --color-brand: #589BFF;
-  --color-brand-accent: #D8EE53;
-  --color-brand-dark: #131313;
-  --color-brand-white: #FFFFFF;
-  --color-brand-bg: #F4F6FB;
-  --color-brand-subtext: #4B5563;
-  --color-brand-surface: #FBFCFF;
-  --color-brand-surface-strong: #F0F4FA;
-  --color-brand-ink-soft: #1F2937;
-
-  /* Status */
-  --color-success: #22C55E;
-  --color-warning: #F59E0B;
-  --color-error: #EF4444;
-  --color-info: #589BFF;
-  --color-status-success-bg: #ECFDF3;
-  --color-status-success-text: #027A48;
-  --color-status-warning-bg: #FFFAEB;
-  --color-status-warning-text: #B54708;
-  --color-status-error-bg: #FEF3F2;
-  --color-status-error-text: #B42318;
-  --color-status-info-bg: #EFF6FF;
-  --color-status-info-text: #1D4ED8;
-  --color-status-neutral-bg: #F3F4F6;
-  --color-status-neutral-text: #475467;
-
-  /* Layout */
-  --container-max: 1200px;
-  --page-max: 1440px;
-  --space-page-x: 2rem;
-  --space-page-y: 2rem;
-  --space-section: 1.5rem;
-  --font-size-display: clamp(2rem, 3vw, 3rem);
-  --font-size-h1: clamp(1.625rem, 2.15vw, 2.25rem);
-  --font-size-h2: clamp(1.375rem, 1.6vw, 1.75rem);
-  --font-size-h3: clamp(1rem, 1.05vw, 1.125rem);
-  --font-size-body: 0.875rem;
-  --font-size-body-sm: 0.8125rem;
-  --font-size-caption: 0.75rem;
-  --font-size-label: 0.78125rem;
-}
-
 :root {
+  /* Global Design Tokens */
+  --brand: #589BFF;
+  --brand-accent: #D8EE53;
+  --brand-dark: #131313;
+  --brand-white: #FFFFFF;
+  --brand-bg: #F4F6FB;
+  --brand-subtext: #4B5563;
+  --brand-surface: #FBFCFF;
+  --brand-surface-strong: #F0F4FA;
+  --brand-ink-soft: #1F2937;
+
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --error: #EF4444;
+  --info: #589BFF;
+
+  --status-success-bg: #ECFDF3;
+  --status-success-text: #027A48;
+  --status-warning-bg: #FFFAEB;
+  --status-warning-text: #B54708;
+  --status-error-bg: #FEF3F2;
+  --status-error-text: #B42318;
+  --status-info-bg: #EFF6FF;
+  --status-info-text: #1D4ED8;
+  --status-neutral-bg: #F3F4F6;
+  --status-neutral-text: #475467;
+
+  --call-bg: #111113;
+  --call-surface: #161618;
+  --call-lobby: #060B14;
+  --call-border: rgba(255, 255, 255, 0.06);
+
+  --state-waiting: #f59e0b;
+  --state-connecting: #3b82f6;
+  --state-live: #22c55e;
+  --state-error: #ef4444;
+
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+
+  /* shadcn UI variables */
   --background: #FFFFFF;
   --foreground: #1A202C;
   --card: #FFFFFF;
@@ -81,6 +79,31 @@
   --sidebar-accent-foreground: #1A202C;
   --sidebar-border: #E5E7EB;
   --sidebar-ring: #589BFF;
+}
+
+.dark {
+  --call-bg: #0b0b0d;
+  --call-surface: #121214;
+}
+
+@utility shadow-soft {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+}
+
+@utility shadow-medium {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+@utility call-surface {
+  @apply bg-call-surface border border-call-border rounded-2xl shadow-soft;
+}
+
+@utility interactive {
+  @apply transition-all duration-200 hover:shadow-medium active:scale-[0.97];
+}
+
+@utility focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-brand/40;
 }
 
 @theme inline {

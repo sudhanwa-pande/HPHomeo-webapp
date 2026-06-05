@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence } from "framer-motion";
 import {
@@ -10,6 +11,7 @@ import {
   Calendar,
   CalendarClock,
   CalendarDays,
+  Clock,
   LayoutList,
   Loader2,
   XCircle,
@@ -118,7 +120,7 @@ function AppointmentsContent() {
         <Button
           size="sm"
           onClick={() => router.push("/patient/doctors")}
-          className="h-8 gap-1.5 bg-brand text-xs hover:bg-brand/90"
+          className="h-9 gap-1.5 bg-brand hover:bg-brand-dark text-white font-bold rounded-xl shadow-sm transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer"
         >
           <Calendar className="h-3.5 w-3.5" />
           Book New
@@ -143,20 +145,20 @@ function AppointmentsContent() {
             )}
 
             {/* Stats strip + view toggle */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <QuickStatsStrip
                 appointments={appointments}
                 activeTab={tab}
                 onTabChange={setTab}
                 className="flex-1"
               />
-              <div className="flex shrink-0 gap-1 rounded-xl border border-gray-200/60 bg-white p-1">
+              <div className="flex shrink-0 gap-1 rounded-xl border border-white/50 bg-white/70 backdrop-blur-sm p-1 shadow-[0_2px_8px_-3px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] self-end sm:self-auto">
                 <button
                   onClick={() => setView("list")}
-                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 active:scale-95 cursor-pointer ${
                     view === "list"
-                      ? "bg-gray-900 text-white"
-                      : "text-gray-500 hover:text-gray-900"
+                      ? "bg-gray-900 text-white shadow-sm"
+                      : "text-gray-500 hover:text-gray-900 hover:bg-white/50"
                   }`}
                 >
                   <LayoutList className="h-3.5 w-3.5" />
@@ -164,10 +166,10 @@ function AppointmentsContent() {
                 </button>
                 <button
                   onClick={() => setView("calendar")}
-                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 active:scale-95 cursor-pointer ${
                     view === "calendar"
-                      ? "bg-gray-900 text-white"
-                      : "text-gray-500 hover:text-gray-900"
+                      ? "bg-gray-900 text-white shadow-sm"
+                      : "text-gray-500 hover:text-gray-900 hover:bg-white/50"
                   }`}
                 >
                   <CalendarDays className="h-3.5 w-3.5" />
@@ -221,12 +223,12 @@ function AppointmentsContent() {
           if (!open) actions.closeCancel();
         }}
       >
-        <DialogContent className="max-w-md gap-0 overflow-hidden rounded-2xl p-0">
-          <div className="border-b border-gray-100 bg-red-50/40 px-6 py-5">
+        <DialogContent className="max-w-md gap-0 overflow-hidden rounded-[2rem] border border-white/50 bg-white/95 backdrop-blur-md shadow-2xl p-0">
+          <div className="border-b border-gray-100 bg-red-50/20 px-6 py-5">
             <DialogHeader className="space-y-1">
-              <DialogTitle className="flex items-center gap-2 text-base">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red-100">
-                  <XCircle className="h-4 w-4 text-red-600" />
+              <DialogTitle className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-red-100 text-red-600 shadow-sm border border-red-200/30">
+                  <XCircle className="h-4 w-4" />
                 </div>
                 Cancel Appointment
               </DialogTitle>
@@ -237,19 +239,22 @@ function AppointmentsContent() {
             </DialogHeader>
           </div>
 
-          <div className="space-y-3 px-6 py-5">
+          <div className="space-y-3.5 px-6 py-5">
             {cancelApt && (
-              <div className="rounded-xl bg-gray-50 p-3.5 ring-1 ring-gray-100">
-                <p className="text-sm font-semibold text-gray-900">
+              <div className="rounded-2xl border border-white/50 bg-gray-50/50 p-4 text-sm text-gray-950">
+                <p className="font-bold text-gray-900">
                   {cancelApt.doctor_name}
                 </p>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  {formatDate(cancelApt.scheduled_at)} at{" "}
+                <p className="mt-1 text-xs text-gray-500 font-medium flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                  {formatDate(cancelApt.scheduled_at)}
+                  <span className="text-gray-300">·</span>
+                  <Clock className="h-3.5 w-3.5 text-gray-400" />
                   {formatTime(cancelApt.scheduled_at)}
                 </p>
                 {cancelApt.payment_status === "paid" && (
-                  <div className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 ring-1 ring-amber-100/60">
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <div className="mt-3 flex items-center gap-2 rounded-xl bg-amber-500/[0.04] border border-amber-200/50 px-3.5 py-2.5 text-xs font-bold text-amber-700 shadow-sm">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
                     Refund of ₹{cancelApt.consultation_fee} will be processed
                   </div>
                 )}
@@ -259,20 +264,20 @@ function AppointmentsContent() {
               value={actions.cancelReason}
               onChange={(e) => actions.setCancelReason(e.target.value)}
               placeholder="Reason for cancellation (optional)"
-              className="rounded-xl"
+              className="rounded-xl border-gray-200 bg-white"
             />
           </div>
 
-          <DialogFooter className="border-t border-gray-100 bg-gray-50/30 px-6 py-4">
+          <DialogFooter className="border-t border-gray-150/40 bg-gray-50/50 px-6 py-4 flex gap-2">
             <Button
               variant="outline"
               onClick={actions.closeCancel}
-              className="rounded-xl"
+              className="rounded-xl border-gray-200 text-gray-700 font-semibold transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer h-10 px-4"
             >
               Keep Appointment
             </Button>
             <Button
-              className="rounded-xl bg-red-600 hover:bg-red-700"
+              className="rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer h-10 px-4"
               disabled={actions.cancelMutation.isPending}
               onClick={actions.confirmCancel}
             >
@@ -296,34 +301,33 @@ function AppointmentsContent() {
           if (!open) actions.closeReschedule();
         }}
       >
-        <DialogContent className="max-w-2xl gap-0 overflow-hidden rounded-2xl p-0">
-          <div className="border-b border-gray-100 bg-brand/[0.03] px-6 py-5">
+        <DialogContent className="max-w-2xl gap-0 overflow-hidden rounded-[2rem] border border-white/50 bg-white/95 backdrop-blur-md shadow-2xl p-0 flex flex-col max-h-[90vh]">
+          <div className="border-b border-gray-150/40 bg-brand/[0.02] px-6 py-5 shrink-0">
             <DialogHeader className="space-y-1">
-              <DialogTitle className="flex items-center gap-2 text-base">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/10">
-                  <CalendarClock className="h-4 w-4 text-brand" />
+              <DialogTitle className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand/10 border border-brand/20 text-brand shadow-sm">
+                  <CalendarClock className="h-4 w-4" />
                 </div>
                 Reschedule Appointment
               </DialogTitle>
               <DialogDescription className="text-xs text-gray-500">
-                Pick a new date and time slot. Your current slot will be
-                released.
+                Pick a new date and time slot. Your current slot will be released.
                 {rescheduleApt?.payment_status === "paid" && (
-                  <span className="mt-1 block font-medium text-emerald-600">
-                    Payment will transfer to the new appointment.
+                  <span className="mt-1 block font-bold text-emerald-600">
+                    Payment will transfer to the new appointment automatically.
                   </span>
                 )}
               </DialogDescription>
             </DialogHeader>
           </div>
 
-          <div className="px-6 py-5">
+          <div className="px-6 py-5 flex-1 overflow-y-auto">
             {rescheduleApt && (
-              <div className="mb-4 rounded-xl bg-gray-50 p-3.5 ring-1 ring-gray-100">
-                <p className="text-[11px] font-medium uppercase tracking-wider text-gray-400">
+              <div className="mb-4 rounded-xl border border-white/50 bg-gray-50/50 p-3.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
                   Current appointment
                 </p>
-                <p className="mt-1 text-sm font-semibold text-gray-900">
+                <p className="mt-1 text-sm font-bold text-gray-900">
                   {rescheduleApt.doctor_name} ·{" "}
                   {formatDate(rescheduleApt.scheduled_at)} at{" "}
                   {formatTime(rescheduleApt.scheduled_at)}
@@ -348,16 +352,16 @@ function AppointmentsContent() {
             <Input
               value={actions.rescheduleNote}
               onChange={(e) => actions.setRescheduleNote(e.target.value)}
-              placeholder="Note (optional)"
-              className="mt-4 rounded-xl"
+              placeholder="Note for the clinic (optional)"
+              className="mt-4 rounded-xl border-gray-200 bg-white"
             />
           </div>
 
-          <DialogFooter className="border-t border-gray-100 bg-gray-50/30 px-6 py-4">
+          <DialogFooter className="border-t border-gray-150/40 bg-gray-50/50 px-6 py-4 flex gap-2 shrink-0">
             <Button
               variant="outline"
               onClick={actions.closeReschedule}
-              className="rounded-xl"
+              className="rounded-xl border-gray-200 text-gray-700 font-semibold transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer h-10 px-4"
             >
               Cancel
             </Button>
@@ -367,7 +371,7 @@ function AppointmentsContent() {
                 actions.rescheduleMutation.isPending
               }
               onClick={actions.confirmReschedule}
-              className="gap-1.5 rounded-xl bg-brand hover:bg-brand/90"
+              className="gap-2 rounded-xl bg-brand text-white font-bold transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer h-10 px-4 shadow-sm"
             >
               {actions.rescheduleMutation.isPending ? (
                 <>

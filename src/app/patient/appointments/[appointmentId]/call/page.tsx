@@ -22,6 +22,9 @@ import { Button } from "@/components/ui/button";
 import type { VideoTokenResponse } from "@/types/doctor";
 import { useCallStore } from "@/stores/call-store";
 import { callSession } from "@/lib/call-session";
+import type { CameraFacingMode } from "@/lib/media";
+import type { LocalVideoTrack, LocalAudioTrack } from "livekit-client";
+import { logEvent } from "@/lib/logger";
 
 const PATIENT_VIDEO_JOIN_EARLY_MINUTES = 10;
 
@@ -42,12 +45,21 @@ function PatientCallContent() {
   const appointmentId = params.appointmentId;
   const isMountedRef = useRef(true);
 
-  const { room, uiPhase, callStartedAt } = useCallStore();
+  const { room, callState, callStartedAt } = useCallStore();
   const [joining, setJoining] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [preferredFacingMode, setPreferredFacingMode] = useState<CameraFacingMode>("user");
+
+  const showPreview = callState === "idle" || callState === "preview_ready";
+  const showSpinner = callState === "connecting" || callState === "connected" || callState === "publishing";
+  const showCall = callState === "incall" || callState === "reconnecting";
+  const showEnded = callState === "ended";
+
+  const joinInFlightRef = useRef(false);
+  const autoResumedRef = useRef(false);
 
   // Keep screen awake during consultation
-  useWakeLock(uiPhase === "incall" || uiPhase === "reconnecting");
+  useWakeLock(showCall);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -61,7 +73,7 @@ function PatientCallContent() {
   // SSE: real-time updates
   useEventStream({
     path: "/patient/events/stream",
-    keepAlive: uiPhase === "incall" || uiPhase === "reconnecting",
+    keepAlive: showCall,
     onEvent: {
       call_state_changed: () => {
         queryClient.invalidateQueries({ queryKey: ["patient", "appointment", appointmentId, "call"] });
@@ -97,11 +109,38 @@ function PatientCallContent() {
     [appointment, nowMs],
   );
 
-  const joinCall = useCallback(
-    async (values: LocalUserChoices) => {
-      if (uiPhase !== "prejoin" || callSession.getRoom()) return;
+  const tokenRefresher = useCallback(async (reason?: string, options?: { signal?: AbortSignal }) => {
+    try {
+      const { data } = await api.post<VideoTokenResponse>(
+        `/patient/appointments/${appointmentId}/video-token`,
+        { recovery_reason: reason, session_id: callSession.getSessionId() },
+        { signal: options?.signal }
+      );
+      if (data.epoch !== undefined) {
+        callSession.updateEpoch(data.epoch);
+      }
+      if (data.session_id && data.session_id !== callSession.getSessionId()) {
+        await callSession.destroy();
+        callSession.resetSessionId(data.session_id);
+      }
+      return data.token;
+    } catch (e) {
+      throw new Error("Token refresh failed: " + String(e));
+    }
+  }, [appointmentId]);
 
+  const joinCall = useCallback(
+    async (values: LocalUserChoices, localTracks?: { videoTrack?: LocalVideoTrack; audioTrack?: LocalAudioTrack }) => {
+      if (joinInFlightRef.current || callSession.getRoom()) return;
+
+      const currentCallState = useCallStore.getState().callState;
+      if (currentCallState !== "idle" && currentCallState !== "preview_ready") return;
+
+      joinInFlightRef.current = true;
       setJoining(true);
+
+      logEvent("JOIN_CLICKED", { role: "patient", values });
+
       try {
         if (appointment?.scheduled_at && joinWindow?.tooEarly) {
           const msg = formatEarlyJoinDescription(appointment.scheduled_at, joinWindow.opensAt);
@@ -111,23 +150,47 @@ function PatientCallContent() {
 
         const { data } = await api.post<VideoTokenResponse>(
           `/patient/appointments/${appointmentId}/video-token`,
-          {},
+          { session_id: callSession.getSessionId() },
         );
+        
+        if (data.epoch !== undefined) {
+          callSession.updateEpoch(data.epoch);
+        }
+        if (data.session_id && data.session_id !== callSession.getSessionId()) {
+          await callSession.destroy();
+          callSession.resetSessionId(data.session_id);
+        }
+
         if (isMountedRef.current) {
-          sessionStorage.setItem("activeCallChoices", JSON.stringify({ audioEnabled: values.audioEnabled, videoEnabled: values.videoEnabled }));
+          sessionStorage.setItem("activeCallChoices", JSON.stringify({ 
+            audioEnabled: values.audioEnabled, 
+            videoEnabled: values.videoEnabled,
+            videoDeviceId: values.videoDeviceId,
+            audioDeviceId: values.audioDeviceId
+          }));
+          
+          logEvent("CONNECT_START", { role: "patient" });
           await callSession.connect(data.server_url, data.token, appointmentId, "patient", tokenRefresher);
-          await callSession.publishTracks(values.audioEnabled, values.videoEnabled);
+          await callSession.publishTracks(
+            values.audioEnabled,
+            values.videoEnabled,
+            preferredFacingMode,
+            values.videoDeviceId,
+            values.audioDeviceId,
+            localTracks
+          );
         }
       } catch (error) {
         const apiMessage = getApiError(error);
         notifyError("Couldn't join call", apiMessage);
       } finally {
+        joinInFlightRef.current = false;
         if (isMountedRef.current) {
           setJoining(false);
         }
       }
     },
-    [appointment, appointmentId, joinWindow, uiPhase],
+    [appointment, appointmentId, joinWindow, preferredFacingMode, tokenRefresher],
   );
 
   // Disconnect room if appointment status becomes "ended" mid-session
@@ -137,24 +200,15 @@ function PatientCallContent() {
     }
   }, [appointment?.call_status, room]);
 
-  const tokenRefresher = useCallback(async (reason?: string) => {
-    try {
-      const { data } = await api.post<VideoTokenResponse>(
-        `/patient/appointments/${appointmentId}/video-token`,
-        { recovery_reason: reason },
-      );
-      return data.token;
-    } catch (e) {
-      throw new Error("Token refresh failed: " + String(e));
-    }
-  }, [appointmentId]);
-
   // Auto-resume call after page refresh
   useEffect(() => {
-    if (uiPhase === "prejoin") {
+    if (autoResumedRef.current) return;
+    const currentCallState = useCallStore.getState().callState;
+    if (currentCallState === "idle" || currentCallState === "preview_ready") {
       const activeCallId = sessionStorage.getItem("activeCallId");
       const choicesRaw = sessionStorage.getItem("activeCallChoices");
       if (activeCallId === appointmentId && choicesRaw) {
+        autoResumedRef.current = true;
         try {
           const choices = JSON.parse(choicesRaw);
           void joinCall(choices);
@@ -163,7 +217,7 @@ function PatientCallContent() {
         }
       }
     }
-  }, [appointmentId, uiPhase, joinCall]);
+  }, [appointmentId, joinCall]);
 
   const canJoin = Boolean(
     appointment && appointment.mode === "online" && appointment.video_enabled && appointment.status === "confirmed" && appointment.call_status !== "ended",
@@ -205,7 +259,7 @@ function PatientCallContent() {
     return <CallState title="Appointment not found" description="This appointment could not be loaded." />;
   }
 
-  if (appointment.call_status === "ended" || uiPhase === "ended") {
+  if (appointment.call_status === "ended" || showEnded) {
     return <ConsultationEnded appointmentId={appointmentId} duration={appointment.duration_min} doctorName={appointment.doctor?.full_name || appointment.doctor_name || undefined} />;
   }
 
@@ -224,13 +278,13 @@ function PatientCallContent() {
   }
 
   return (
-    <div className="relative h-screen bg-[#111113] flex flex-col" data-lk-theme="default">
+    <div className="relative h-screen bg-app-bg flex flex-col" data-lk-theme="default">
       {/* 1. Lobby (PreJoin) */}
-      {uiPhase === "prejoin" && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#060B14]">
+      {showPreview && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-start sm:justify-center overflow-y-auto bg-overlay py-6 px-4">
           <CustomPreJoin
             onSubmit={joinCall}
-            patientName={appointment?.patient_name || "Patient"}
+            userName={appointment?.patient_name || "Patient"}
             isJoining={joining}
             otherPartyWaiting={appointment?.call_status === "waiting"}
           />
@@ -238,15 +292,15 @@ function PatientCallContent() {
       )}
 
       {/* 2. Connecting State */}
-      {uiPhase === "connecting" && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#060B14] text-white">
+      {showSpinner && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-overlay text-white">
           <Loader2 className="h-10 w-10 animate-spin text-brand mb-4" />
           <p className="text-sm font-medium text-white/60 animate-pulse">Connecting to call...</p>
         </div>
       )}
 
       {/* 3. Active Call */}
-      {room && (uiPhase === "incall" || uiPhase === "reconnecting") && (
+      {room && showCall && (
         <RoomContext.Provider value={room}>
           <LiveCallRoom
             title={appointment.doctor_name}
@@ -259,6 +313,9 @@ function PatientCallContent() {
             tokenRefresher={tokenRefresher}
             endLabel="Leave call"
             callStartedAt={callStartedAt}
+            allowCameraSwitch
+            preferredFacingMode={preferredFacingMode}
+            onFacingModeChange={setPreferredFacingMode}
             infoLabel="Appointment details"
             infoContent={
               <div className="space-y-3 rounded-xl bg-white/6 p-4 text-sm text-white">
@@ -288,8 +345,8 @@ function ConsultationEnded({ appointmentId, duration, doctorName }: { appointmen
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-bg px-6">
       <div className="w-full max-w-lg rounded-3xl border border-gray-200/80 bg-white px-8 py-10 text-center shadow-sm">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
-          <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-status-success-bg">
+          <CheckCircle2 className="h-8 w-8 text-status-success-text" />
         </div>
         <p className="mt-6 text-xl font-bold text-gray-900">Consultation Ended</p>
         
