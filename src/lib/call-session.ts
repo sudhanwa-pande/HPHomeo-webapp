@@ -1586,7 +1586,7 @@ class CallSessionManager {
       }
     } catch (err) {
       if (err instanceof Error && err.message === "SESSION_TERMINATED") {
-        throw err;
+        return;
       }
       console.warn("Heartbeat network error:", err);
     } finally {
