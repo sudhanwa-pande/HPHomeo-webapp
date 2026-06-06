@@ -54,8 +54,32 @@ export function CustomPreJoin({
   useEffect(() => {
     async function getDevices() {
       try {
+        // Request permissions first to ensure we get proper labels and multiple cameras on mobile
+        try {
+          const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          tempStream.getTracks().forEach((track) => track.stop());
+        } catch (err) {
+          console.warn("Permission pre-flight failed", err);
+        }
+
         const devs = await navigator.mediaDevices.enumerateDevices();
         setDevices(devs);
+        
+        // Auto-select devices if none are selected yet
+        const videoDevs = devs.filter(d => d.kind === "videoinput");
+        if (videoDevs.length > 0) {
+          const frontCam = videoDevs.find(d => 
+            d.label.toLowerCase().includes("front") || 
+            d.label.toLowerCase().includes("user") ||
+            d.label.toLowerCase().includes("selfie")
+          );
+          setSelectedVideoDevice(prev => prev || (frontCam ? frontCam.deviceId : videoDevs[0].deviceId));
+        }
+        
+        const audioDevs = devs.filter(d => d.kind === "audioinput");
+        if (audioDevs.length > 0) {
+          setSelectedAudioDevice(prev => prev || audioDevs[0].deviceId);
+        }
       } catch (e) {
         console.warn("Failed to enumerate devices", e);
       }
@@ -99,7 +123,8 @@ export function CustomPreJoin({
 
         createdTrack = await createLocalVideoTrack({
           deviceId: selectedVideoDevice || undefined,
-        });
+          facingMode: "user",
+        } as any);
 
         if (active) {
           videoTrackRef.current = createdTrack;
