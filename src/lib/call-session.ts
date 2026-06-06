@@ -181,6 +181,8 @@ class CallSessionManager {
     this.sessionId = newSessionId || `csm-${++_sessionSeq}`;
     this.epoch = 1;
     this.seq = 0;
+    this.isDestroyed = false;
+    this.isTerminating = false;
     this.log("session_reset", { sessionId: this.sessionId });
   }
 

@@ -425,7 +425,7 @@ export function CustomPreJoin({
                   <SelectContent className="border-call-border bg-panel text-white rounded-2xl">
                     {videoDevices.map((device) => (
                       <SelectItem key={device.deviceId} value={device.deviceId} className="rounded-xl hover:bg-white/5 cursor-pointer">
-                        {device.label || `Camera ${device.deviceId.slice(0, 5)}`}
+                        {device.label && device.label.length > 40 && !device.label.includes(" ") ? device.label.slice(0, 8) + "..." : device.label || `Camera ${device.deviceId.slice(0, 5)}`}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -447,7 +447,7 @@ export function CustomPreJoin({
                   <SelectContent className="border-call-border bg-panel text-white rounded-2xl">
                     {audioDevices.map((device) => (
                       <SelectItem key={device.deviceId} value={device.deviceId} className="rounded-xl hover:bg-white/5 cursor-pointer">
-                        {device.label || `Microphone ${device.deviceId.slice(0, 5)}`}
+                        {device.label && device.label.length > 40 && !device.label.includes(" ") ? device.label.slice(0, 8) + "..." : device.label || `Microphone ${device.deviceId.slice(0, 5)}`}
                       </SelectItem>
                     ))}
                   </SelectContent>

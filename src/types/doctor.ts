@@ -234,7 +234,7 @@ export interface VideoTokenResponse {
 }
 
 // Call status type (shared across all appointment types)
-export type CallStatus = "idle" | "waiting" | "connected" | "disconnected" | "ended";
+export type CallStatus = "idle" | "waiting" | "connected" | "disconnected" | "ended" | "initializing";
 
 // Waiting patient (from heartbeat presence or call_status="waiting")
 export interface WaitingPatient {
