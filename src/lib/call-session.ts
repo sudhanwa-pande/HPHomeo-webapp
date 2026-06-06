@@ -4,9 +4,15 @@ import type { CameraFacingMode } from "@/lib/media";
 import { useCallStore } from "@/stores/call-store";
 import type { CallState } from "@/stores/call-store";
 import { logEvent } from "@/lib/logger";
-import { notifyError } from "@/lib/notify";
+import { notifyError, notifyWarning } from "@/lib/notify";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function buildUrl(baseUrl: string, path: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const cleanPath = path.replace(/^\/+/, "");
+  return cleanBase ? `${cleanBase}/${cleanPath}` : `/${cleanPath}`;
+}
 
 let _sessionSeq = 0;
 
@@ -120,8 +126,12 @@ class CallSessionManager {
   private facingMode: CameraFacingMode = "user";
 
   private heartbeat404Count = 0;
+  private firstHeartbeatFailureAt: number | null = null;
+  private warnedUnstableHeartbeat = false;
   private static readonly HEARTBEAT_404_THRESHOLD = 5;
   private static readonly HEARTBEAT_GRACE_MS = 10_000;
+  private static readonly MAX_HEARTBEAT_FAILURE_WINDOW_MS = 120_000; // 2 minutes soft window
+  private static readonly MAX_HEARTBEAT_FAILURE_ROOM_ACTIVE_WINDOW_MS = 300_000; // 5 minutes hard window
 
   // Sequence versioning for token refresher requests during reconnect cycles
   private tokenRefreshSeq = 0;
@@ -411,6 +421,8 @@ class CallSessionManager {
         if (this.room !== room) return;
         this.retryCount = 0;
         this.heartbeat404Count = 0;
+        this.firstHeartbeatFailureAt = null;
+        this.warnedUnstableHeartbeat = false;
         this.lastConnectedEventAt = Date.now();
         const currentStore = useCallStore.getState();
         this.setCallState("connected");
@@ -445,6 +457,8 @@ class CallSessionManager {
         if (this.room !== room) return;
         this.retryCount = 0;
         this.heartbeat404Count = 0;
+        this.firstHeartbeatFailureAt = null;
+        this.warnedUnstableHeartbeat = false;
         this.lastConnectedEventAt = Date.now();
         const currentStore = useCallStore.getState();
         this.setCallState("incall");
@@ -823,19 +837,48 @@ class CallSessionManager {
 
       // ── 2. Publish camera track with usability validation & atomic unpublish ──
       if (video) {
+        const createTrackWithFallback = async (): Promise<LocalVideoTrack> => {
+          try {
+            this.log("track_recreate_attempt", { deviceId: this.videoDeviceId, facingMode: this.facingMode });
+            const track = await createLocalVideoTrack({
+              deviceId: this.videoDeviceId,
+              facingMode: this.facingMode || "user",
+            });
+            logEvent("track_recreated", { deviceId: this.videoDeviceId, facingMode: this.facingMode || "user", success: true });
+            return track;
+          } catch (err) {
+            this.log("track_recreate_with_device_id_failed_falling_back_to_facing_mode", { error: String(err) });
+            try {
+              const fallbackTrack = await createLocalVideoTrack({
+                facingMode: "user",
+              });
+              logEvent("track_recreated", { deviceId: "none", facingMode: "user", success: true, fallback: true });
+              return fallbackTrack;
+            } catch (fallbackErr) {
+              this.log("track_recreate_fallback_failed", { error: String(fallbackErr) });
+              logEvent("track_recreated", { success: false, error: String(fallbackErr) });
+              throw fallbackErr;
+            }
+          }
+        };
+
         let camTrack = preCreatedTracks?.videoTrack;
         if (camTrack) {
           const isUsable = camTrack.mediaStreamTrack.readyState === "live" && !camTrack.mediaStreamTrack.muted;
           if (!isUsable) {
             this.log("precreated_video_track_dead_recreating");
             try {
-              camTrack = await createLocalVideoTrack({ deviceId: this.videoDeviceId });
+              camTrack = await createTrackWithFallback();
             } catch (err) {
               this.log("recreate_video_failed", { error: String(err) });
             }
           }
         } else {
-          camTrack = await createLocalVideoTrack({ deviceId: this.videoDeviceId });
+          try {
+            camTrack = await createTrackWithFallback();
+          } catch (err) {
+            this.log("recreate_video_failed", { error: String(err) });
+          }
         }
 
         if (this.isDestroyed || this.room !== roomRef) return;
@@ -978,7 +1021,7 @@ class CallSessionManager {
     // Proactive status check: stop recovery if backend indicates call has ended (Server-Authoritative Gate)
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
     const prefix = this.role === "public" ? "public" : this.role === "patient" ? "patient" : "doctor";
-    const statusUrl = `${baseUrl}/${prefix}/appointments/${this.appointmentId}`;
+    const statusUrl = buildUrl(baseUrl, `/${prefix}/appointments/${this.appointmentId}`);
     try {
       const statusRes = await fetch(statusUrl, { credentials: "include" });
       this.checkTerminated();
@@ -1219,6 +1262,8 @@ class CallSessionManager {
     this.recoveryReason = null;
     this.recoveryStartedAt = null;
     this.heartbeat404Count = 0;
+    this.firstHeartbeatFailureAt = null;
+    this.warnedUnstableHeartbeat = false;
     this.isPublishing = false;
     this.publishStartedAt = null;
     this.activePublishRoom = null;
@@ -1319,7 +1364,7 @@ class CallSessionManager {
 
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
     const prefix = role === "public" ? "public" : role === "patient" ? "patient" : "doctor";
-    const url = `${baseUrl}/${prefix}/appointments/${appointmentId}/call/heartbeat`;
+    const url = buildUrl(baseUrl, `/${prefix}/appointments/${appointmentId}/call/heartbeat`);
 
     this.log("heartbeat_start", { url });
 
@@ -1368,7 +1413,14 @@ class CallSessionManager {
       this.lastRtt = rtt;
 
       if (res.ok || res.status === 202) {
+        if (this.firstHeartbeatFailureAt !== null) {
+          const downtimeMs = performance.now() - this.firstHeartbeatFailureAt;
+          this.log("heartbeat_recovered", { downtimeMs, consecutiveCount: this.heartbeat404Count });
+          logEvent("heartbeat_recovered", { downtimeMs, consecutiveCount: this.heartbeat404Count });
+        }
         this.heartbeat404Count = 0;
+        this.firstHeartbeatFailureAt = null;
+        this.warnedUnstableHeartbeat = false;
         this.seq++; // Increment sequence count only on successful heartbeat response
 
         try {
@@ -1490,16 +1542,42 @@ class CallSessionManager {
             console.warn("Heartbeat retry network error:", err);
           }
         }
-      } else if (res.status === 404) {
+      } else if ([404, 502, 503, 504].includes(res.status)) {
         this.heartbeat404Count++;
-        this.log("heartbeat_404", { consecutiveCount: this.heartbeat404Count });
+        this.log("heartbeat_failure", { status: res.status, consecutiveCount: this.heartbeat404Count });
 
-        if (this.heartbeat404Count >= CallSessionManager.HEARTBEAT_404_THRESHOLD) {
-          this.log("heartbeat_404_terminal");
-          const store = useCallStore.getState();
-          this.setCallState("ended");
-          store._setError("Call session ended or not found.");
-          void this.destroy();
+        if (!this.firstHeartbeatFailureAt) {
+          this.firstHeartbeatFailureAt = performance.now();
+        }
+
+        const elapsedMs = performance.now() - this.firstHeartbeatFailureAt;
+        const isRoomActive = this.room && this.room.state !== RoomConnectionState.Disconnected;
+
+        if (isRoomActive) {
+          if (elapsedMs >= CallSessionManager.MAX_HEARTBEAT_FAILURE_ROOM_ACTIVE_WINDOW_MS) {
+            this.log("heartbeat_failure_zombie_cutoff", { elapsedMs });
+            const store = useCallStore.getState();
+            this.setCallState("ended");
+            store._setError("Server connection lost permanently.");
+            void this.destroy();
+          } else if (elapsedMs >= CallSessionManager.MAX_HEARTBEAT_FAILURE_WINDOW_MS) {
+            if (!this.warnedUnstableHeartbeat) {
+              this.log("heartbeat_failure_soft_degraded", { elapsedMs });
+              notifyWarning("Connection unstable", "Heartbeat to server failed. Trying to reconnect...");
+              this.warnedUnstableHeartbeat = true;
+            }
+          } else {
+            this.log("heartbeat_failure_ignored_transient", { elapsedMs });
+          }
+        } else {
+          // WebRTC is not active: enforce strict 2-minute timeout
+          if (elapsedMs >= CallSessionManager.MAX_HEARTBEAT_FAILURE_WINDOW_MS) {
+            this.log("heartbeat_failure_terminal", { elapsedMs });
+            const store = useCallStore.getState();
+            this.setCallState("ended");
+            store._setError("Call session ended or not found.");
+            void this.destroy();
+          }
         }
       } else {
         console.warn(`Heartbeat response not OK: ${res.status}`);

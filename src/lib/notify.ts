@@ -3,6 +3,20 @@
 import { getApiError } from "@/lib/api";
 import { toast } from "@/lib/toast";
 
+let lastNotifiedApptId = "";
+let lastNotifiedTime = 0;
+
+export function shouldNotifyAppointment(appointmentId: string): boolean {
+  if (!appointmentId) return true;
+  const now = Date.now();
+  if (lastNotifiedApptId === appointmentId && now - lastNotifiedTime < 10000) {
+    return false;
+  }
+  lastNotifiedApptId = appointmentId;
+  lastNotifiedTime = now;
+  return true;
+}
+
 function resolveDescription(title: string, description?: string) {
   const value = description?.trim();
   if (!value || value === title) return undefined;

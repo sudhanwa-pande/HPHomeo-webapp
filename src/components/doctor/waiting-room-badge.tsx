@@ -8,6 +8,7 @@ import { format } from "date-fns";
 
 import api from "@/lib/api";
 import type { CallsDashboardResponse } from "@/types/doctor";
+import { notifyInfo, shouldNotifyAppointment } from "@/lib/notify";
 
 export function WaitingRoomBadge() {
   const router = useRouter();
@@ -35,12 +36,29 @@ export function WaitingRoomBadge() {
     let timeoutId: number | undefined;
 
     if (count > prevCountRef.current && prevCountRef.current >= 0) {
-      // Browser notification (if permission granted)
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        new Notification("Patient Waiting", {
-          body: `${waiting?.[0]?.patient_name ?? "A patient"} is waiting for your call.`,
-          icon: "/images/logo.svg",
-        });
+      const firstPatient = waiting?.[0];
+      const appointmentId = firstPatient?.appointment_id || "";
+      const patientName = firstPatient?.patient_name || "A patient";
+
+      if (shouldNotifyAppointment(appointmentId)) {
+        let browserNotificationShown = false;
+        // Browser notification (if permission granted)
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+          try {
+            new Notification("Patient Waiting", {
+              body: `${patientName} is waiting for your call.`,
+              icon: "/images/logo.svg",
+            });
+            browserNotificationShown = true;
+          } catch (e) {
+            console.warn("notification_failed", e);
+          }
+        }
+
+        // Fallback UI toast trigger if browser notification was not shown
+        if (!browserNotificationShown) {
+          notifyInfo("Patient waiting", `${patientName} has joined the waiting room.`);
+        }
       }
       timeoutId = window.setTimeout(() => setOpen(true), 0);
     }
@@ -52,8 +70,14 @@ export function WaitingRoomBadge() {
 
   // Request notification permission on mount
   useEffect(() => {
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      Notification.requestPermission();
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      try {
+        Notification.requestPermission().catch((err) => {
+          console.warn("notification_permission_failed", err);
+        });
+      } catch (e) {
+        console.warn("notification_permission_failed", e);
+      }
     }
   }, []);
 

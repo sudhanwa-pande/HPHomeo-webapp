@@ -7,7 +7,7 @@ import { Calendar, ChevronsUpDown, ClipboardList, Clock, LayoutDashboard, LogOut
 
 import { useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { notifyError, notifyInfo } from "@/lib/notify";
+import { notifyError, notifyInfo, shouldNotifyAppointment } from "@/lib/notify";
 import { useEventStream } from "@/hooks/use-event-stream";
 import { playPatientWaitingSound } from "@/lib/sound";
 import { useDoctorAuth } from "@/stores/doctor-auth";
@@ -88,9 +88,17 @@ export function DoctorShell({ children, title, subtitle, headerRight }: DoctorSh
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail"] });
-        void playPatientWaitingSound();
-        const patientName =
-          (event.data as { patient_name?: string }).patient_name || "A patient";
+        const data = event?.data as Record<string, unknown> | undefined;
+        const appointmentId = (data?.appointment_id as string) || "";
+        if (!shouldNotifyAppointment(appointmentId)) {
+          return;
+        }
+        try {
+          void playPatientWaitingSound();
+        } catch (e) {
+          console.warn("Failed to play patient waiting sound:", e);
+        }
+        const patientName = (data?.patient_name as string) || "A patient";
         notifyInfo("Patient waiting", `${patientName} has joined the waiting room.`);
       },
       appointment_booked: () => {

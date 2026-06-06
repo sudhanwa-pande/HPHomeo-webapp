@@ -48,6 +48,7 @@ export function CustomPreJoin({
 
   const videoTrackRef = useRef<LocalVideoTrack | null>(null);
   const audioTrackRef = useRef<LocalAudioTrack | null>(null);
+  const hasSubmittedRef = useRef(false);
 
   // Fetch device list
   useEffect(() => {
@@ -84,6 +85,15 @@ export function CustomPreJoin({
         setError(null);
         
         if (videoTrackRef.current) {
+          const settings = videoTrackRef.current.mediaStreamTrack.getSettings();
+          const matchesDevice = selectedVideoDevice
+            ? (settings.deviceId === selectedVideoDevice || (!settings.deviceId && settings.facingMode === "user"))
+            : true;
+
+          if (videoTrackRef.current.mediaStreamTrack.readyState === "live" && matchesDevice) {
+            setIsLoading(false);
+            return;
+          }
           videoTrackRef.current.stop();
         }
 
@@ -127,7 +137,7 @@ export function CustomPreJoin({
     updateVideoTrack();
     return () => {
       active = false;
-      if (createdTrack) {
+      if (createdTrack && !hasSubmittedRef.current) {
         createdTrack.stop();
       }
     };
@@ -150,6 +160,14 @@ export function CustomPreJoin({
 
       try {
         if (audioTrackRef.current) {
+          const settings = audioTrackRef.current.mediaStreamTrack.getSettings();
+          const matchesDevice = selectedAudioDevice
+            ? (settings.deviceId === selectedAudioDevice)
+            : true;
+
+          if (audioTrackRef.current.mediaStreamTrack.readyState === "live" && matchesDevice) {
+            return;
+          }
           audioTrackRef.current.stop();
         }
 
@@ -182,7 +200,7 @@ export function CustomPreJoin({
     updateAudioTrack();
     return () => {
       active = false;
-      if (createdTrack) {
+      if (createdTrack && !hasSubmittedRef.current) {
         createdTrack.stop();
       }
     };
@@ -222,6 +240,7 @@ export function CustomPreJoin({
   const handleSubmit = () => {
     if (isJoining) return;
     hapticTap();
+    hasSubmittedRef.current = true;
     
     const videoTrack = videoTrackRef.current || undefined;
     const audioTrack = audioTrackRef.current || undefined;

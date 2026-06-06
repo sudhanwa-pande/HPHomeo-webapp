@@ -128,6 +128,15 @@
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
+  --color-brand: var(--brand);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-white: var(--brand-white);
+  --color-brand-bg: var(--brand-bg);
+  --color-brand-subtext: var(--brand-subtext);
+  --color-brand-surface: var(--brand-surface);
+  --color-brand-surface-strong: var(--brand-surface-strong);
+  --color-brand-ink-soft: var(--brand-ink-soft);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -212,13 +221,13 @@
   }
 
   .premium-button {
-    background: linear-gradient(to right, var(--color-brand-accent), #d8ff63);
-    box-shadow: 0 8px 24px rgba(216, 238, 83, 0.28);
-    transition: all 300ms ease;
+    background: linear-gradient(to right, var(--brand-accent), #d8ff63) !important;
+    box-shadow: 0 8px 24px rgba(216, 238, 83, 0.28) !important;
+    transition: all 300ms ease !important;
   }
   .premium-button:hover {
-    box-shadow: 0 12px 32px rgba(216, 238, 83, 0.35);
-    transform: translateY(-0.125rem);
+    box-shadow: 0 12px 32px rgba(216, 238, 83, 0.35) !important;
+    transform: translateY(-0.125rem) !important;
   }
 
   .section-glow {
@@ -560,7 +569,7 @@
     width: 2px;
     height: 0.92em;
     border-radius: 999px;
-    background: var(--color-brand);
+    background: var(--brand, #589BFF) !important;
     animation: caret-blink 1s step-end infinite;
     position: relative;
     z-index: 1;
