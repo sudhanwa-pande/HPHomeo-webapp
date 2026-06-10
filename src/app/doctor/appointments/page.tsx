@@ -325,7 +325,7 @@ function AppointmentsContent() {
     const total = todayAll.length;
     const completed = todayAll.filter((a) => a.status === "completed").length;
     const upcoming = todayAll.filter(
-      (a) => a.status === "confirmed" && isAfter(parseISO(a.scheduled_at), now),
+      (a) => ["confirmed", "pending_payment", "rescheduled"].includes(a.status) && isAfter(parseISO(a.scheduled_at), now),
     ).length;
     const noShows = todayAll.filter((a) => a.status === "no_show").length;
     return { total, completed, upcoming, noShows };

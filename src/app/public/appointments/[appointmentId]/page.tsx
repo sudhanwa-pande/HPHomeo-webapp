@@ -1,4 +1,5 @@
 "use client";
+"use no memo";
 
 import dynamic from "next/dynamic";
 import Image from "next/image";

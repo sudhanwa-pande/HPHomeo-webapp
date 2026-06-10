@@ -57,6 +57,7 @@ function CallRoomContent() {
   const [joining, setJoining] = useState(false);
   const { doctor } = useDoctorAuth();
   const [preferredFacingMode, setPreferredFacingMode] = useState<CameraFacingMode>("user");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<"notes" | "info" | "chat">("notes");
 
   const showPreview = callState === "idle" || callState === "preview_ready";
   const showSpinner = callState === "connecting" || callState === "connected" || callState === "publishing";
@@ -70,7 +71,12 @@ function CallRoomContent() {
 
   useEffect(() => {
     isMountedRef.current = true;
-    useCallStore.getState().reset();
+    
+    const isResume = typeof window !== "undefined" && window.location.search.includes("resume=true");
+    if (!isResume) {
+      useCallStore.getState().reset();
+    }
+    
     return () => {
       isMountedRef.current = false;
       void callSession.destroy();
@@ -186,23 +192,45 @@ function CallRoomContent() {
     [appointmentId, preferredFacingMode, tokenRefresher],
   );
 
-  // Auto-resume call after page refresh
+  // Auto-resume call after page refresh or PiP -> Fullscreen jump
   useEffect(() => {
     if (autoResumedRef.current) return;
-    const currentCallState = useCallStore.getState().callState;
-    if (currentCallState === "idle" || currentCallState === "preview_ready") {
-      const activeCallId = sessionStorage.getItem("activeCallId");
-      const choicesRaw = sessionStorage.getItem("activeCallChoices");
-      if (activeCallId === appointmentId && choicesRaw) {
-        autoResumedRef.current = true;
-        try {
-          const choices = JSON.parse(choicesRaw);
-          void joinCall(choices);
-        } catch (e) {
-          console.error("Failed to parse auto-resume choices", e);
+    
+    const runResume = async () => {
+      const isResume = typeof window !== "undefined" && window.location.search.includes("resume=true");
+      
+      if (isResume) {
+        if (callSession.getRoom() && useCallStore.getState().callState !== "idle") {
+          autoResumedRef.current = true;
+          return;
+        } else if (callSession.sessionReadyPromise) {
+          try {
+            await callSession.sessionReadyPromise;
+            autoResumedRef.current = true;
+            return;
+          } catch (e) {
+            console.warn("sessionReadyPromise failed during resume, falling back", e);
+          }
         }
       }
-    }
+      
+      const currentCallState = useCallStore.getState().callState;
+      if (currentCallState === "idle" || currentCallState === "preview_ready") {
+        const activeCallId = sessionStorage.getItem("activeCallId");
+        const choicesRaw = sessionStorage.getItem("activeCallChoices");
+        if (activeCallId === appointmentId && choicesRaw) {
+          autoResumedRef.current = true;
+          try {
+            const choices = JSON.parse(choicesRaw);
+            void joinCall(choices);
+          } catch (e) {
+            console.error("Failed to parse auto-resume choices", e);
+          }
+        }
+      }
+    };
+    
+    void runResume();
   }, [appointmentId, joinCall]);
 
   // Disconnect room if appointment status becomes "ended" (via SSE/polling)
@@ -311,49 +339,64 @@ function CallRoomContent() {
               router={router}
               preferredFacingMode={preferredFacingMode}
               onFacingModeChange={setPreferredFacingMode}
+              activeWorkspaceTab={activeWorkspaceTab}
+              setActiveWorkspaceTab={setActiveWorkspaceTab}
             />
           </RoomContext.Provider>
         </PrescriptionFormProvider>
       )}
 
       {/* 4. Ended Screen */}
-      {showEnded && (
-        <div className="flex min-h-screen items-center justify-center bg-app-bg px-4">
-          <div className="w-full max-w-md rounded-3xl border border-call-border bg-panel p-8 text-center text-white">
-            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-state-live/10">
-              <PhoneOff className="h-7 w-7 text-state-live" />
-            </div>
-            <h2 className="text-2xl font-semibold tracking-tight">Call ended</h2>
-            <p className="mt-2 text-sm leading-relaxed text-white/45">
-              {appointment?.patient?.full_name
-                ? `The consultation with ${appointment.patient.full_name} has finished.`
-                : "The consultation has finished."}
-            </p>
+      {showEnded && appointment && (
+        <PrescriptionFormProvider appointmentId={appointmentId} appointment={appointment}>
+          <div className="flex h-screen w-full overflow-hidden bg-app-bg text-white">
+            <div className="flex-1 flex flex-col items-center justify-center px-4 relative">
+              <div className="w-full max-w-md rounded-3xl border border-call-border bg-panel p-8 text-center text-white z-10 shadow-2xl">
+                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-state-live/10">
+                  <PhoneOff className="h-7 w-7 text-state-live" />
+                </div>
+                <h2 className="text-2xl font-semibold tracking-tight">Call ended</h2>
+                <p className="mt-2 text-sm leading-relaxed text-white/45">
+                  {appointment?.patient?.full_name
+                    ? `The consultation with ${appointment.patient.full_name} has finished.`
+                    : "The consultation has finished."}
+                </p>
 
-            <div className="mt-8 space-y-2.5">
-              {appointment?.status === "confirmed" ? (
-                <Button
-                  className="h-11 w-full rounded-2xl bg-state-live text-sm font-semibold text-white hover:bg-state-live hover:opacity-90"
-                  loading={completeMutation.isPending}
-                  onClick={() => completeMutation.mutate()}
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  Mark appointment completed
-                </Button>
-              ) : null}
-              <Button
-                variant="outline"
-                className="h-11 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
-                onClick={() => {
-                  router.push(`/doctor/appointments/${appointmentId}`);
-                }}
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to appointments
-              </Button>
+                <div className="mt-8 space-y-2.5">
+                  {appointment?.status === "confirmed" ? (
+                    <Button
+                      className="h-11 w-full rounded-2xl bg-state-live text-sm font-semibold text-white hover:bg-state-live hover:opacity-90"
+                      loading={completeMutation.isPending}
+                      onClick={() => completeMutation.mutate()}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      Mark appointment completed
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    className="h-11 w-full rounded-2xl border-white/[0.08] bg-transparent text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
+                    onClick={() => {
+                      router.push(`/doctor/appointments/${appointmentId}`);
+                    }}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Back to appointments
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="hidden lg:block w-[420px] md:w-[480px] lg:w-[520px] shrink-0 h-full border-l border-call-border bg-panel z-20">
+              <DoctorConsultationWorkspace
+                appointmentId={appointmentId}
+                appointment={appointment}
+                activeTab={activeWorkspaceTab}
+                onTabChange={setActiveWorkspaceTab}
+              />
             </div>
           </div>
-        </div>
+        </PrescriptionFormProvider>
       )}
     </div>
   );
@@ -368,6 +411,8 @@ interface ActiveCallWorkspaceWrapperProps {
   router: any;
   preferredFacingMode: CameraFacingMode;
   onFacingModeChange: (mode: CameraFacingMode) => void;
+  activeWorkspaceTab: "notes" | "info" | "chat";
+  setActiveWorkspaceTab: (tab: "notes" | "info" | "chat") => void;
 }
 
 function ActiveCallWorkspaceWrapper({
@@ -379,8 +424,9 @@ function ActiveCallWorkspaceWrapper({
   router,
   preferredFacingMode,
   onFacingModeChange,
+  activeWorkspaceTab,
+  setActiveWorkspaceTab,
 }: ActiveCallWorkspaceWrapperProps) {
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<"notes" | "info" | "chat">("notes");
 
   return (
     <LiveCallRoom

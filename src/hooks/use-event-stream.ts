@@ -1,4 +1,5 @@
 "use client";
+"use no memo";
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import api from "@/lib/api";
@@ -173,7 +174,7 @@ export function useEventStream({
         .then(() => {
           if (!mountedRef.current) return; // component unmounted during refresh
           retryCountRef.current = 0;
-          connect();
+          setTimeout(connect, 0);
         })
         .catch(() => {
           if (!mountedRef.current) return;

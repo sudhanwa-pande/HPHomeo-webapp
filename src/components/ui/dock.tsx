@@ -1,4 +1,5 @@
 "use client";
+"use no memo";
 
 import * as React from "react";
 import { useRef } from "react";
@@ -137,6 +138,7 @@ export function Dock({
                 handleIconHover,
                 iconSize,
               })
+            // eslint-disable-next-line react-hooks/refs
             : child,
         )}
       </ul>

@@ -23,11 +23,11 @@ function decodeJwt(token: string): any {
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
     const jsonPayload = typeof window !== "undefined"
       ? decodeURIComponent(
-          window.atob(base64)
-            .split("")
-            .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-            .join("")
-        )
+        window.atob(base64)
+          .split("")
+          .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+          .join("")
+      )
       : Buffer.from(base64, "base64").toString("utf8");
     return JSON.parse(jsonPayload);
   } catch (e) {
@@ -92,10 +92,12 @@ class CallSessionManager {
   private room: Room | null = null;
   private pageHideListener: ((e: PageTransitionEvent) => void) | null = null;
   private visibilityListener: (() => void) | null = null;
+  private onlineListener: (() => void) | null = null;
+  private offlineListener: (() => void) | null = null;
   private storageEventListener: ((e: StorageEvent) => void) | null = null;
   private broadcastChannel: BroadcastChannel | null = null;
   private retryCount = 0;
-  
+
   private tokenRefresher: ((reason?: string, options?: { signal?: AbortSignal }) => Promise<string>) | null = null;
   private serverUrl: string | null = null;
   private appointmentId: string | null = null;
@@ -112,7 +114,7 @@ class CallSessionManager {
   // Cache: persists for auto-resume
   private videoDeviceId: string | undefined = undefined;
   private audioDeviceId: string | undefined = undefined;
-  
+
   // Publish mutex
   private isPublishing = false;
   private publishStartedAt: number | null = null;
@@ -162,10 +164,39 @@ class CallSessionManager {
   private isDegraded = false;
   private mediaPolicy: "normal" | "restricted" | "none" = "normal";
 
+  public sessionReadyPromise: Promise<void> | null = null;
+  private resolveSessionReady: (() => void) | null = null;
+  private rejectSessionReady: ((err: Error) => void) | null = null;
+  private sessionReadyTimeout: ReturnType<typeof setTimeout> | null = null;
+
   private checkTerminated(): void {
     if (this.isTerminating || this.isDestroyed) {
       throw new Error("SESSION_TERMINATED");
     }
+  }
+
+  private newController(): AbortController {
+    if (this.tokenAbortController) {
+      this.tokenAbortController.abort();
+    }
+    this.tokenAbortController = new AbortController();
+    return this.tokenAbortController;
+  }
+
+  private refreshPromise: Promise<string> | null = null;
+
+  private async safeRefreshToken(reason?: string, signal?: AbortSignal): Promise<string> {
+    if (!this.tokenRefresher) throw new Error("No token refresher available");
+    if (!this.refreshPromise) {
+      this.refreshPromise = (async () => {
+        try {
+          return await this.tokenRefresher!(reason, { signal });
+        } finally {
+          this.refreshPromise = null;
+        }
+      })();
+    }
+    return this.refreshPromise;
   }
 
   getSessionId(): string {
@@ -230,13 +261,39 @@ class CallSessionManager {
     this.isTerminating = false;
     this.sessionId = `csm-${++_sessionSeq}`;
 
+    if (this.sessionReadyTimeout) clearTimeout(this.sessionReadyTimeout);
+    this.sessionReadyPromise = new Promise((resolve, reject) => {
+      this.resolveSessionReady = resolve;
+      this.rejectSessionReady = reject;
+    });
+    this.sessionReadyTimeout = setTimeout(() => {
+      if (this.rejectSessionReady) {
+        this.rejectSessionReady(new Error("Session init timeout"));
+        this.rejectSessionReady = null;
+        this.resolveSessionReady = null;
+      }
+    }, 8000);
+
     this.connectingAppointmentId = appointmentId;
     this.connectPromise = this._connectInternal(serverUrl, token, appointmentId, role, tokenRefresher);
-    
+
     try {
       await this.connectPromise;
       this.checkTerminated();
+      if (this.resolveSessionReady) {
+        this.resolveSessionReady();
+        this.resolveSessionReady = null;
+        this.rejectSessionReady = null;
+      }
+    } catch (err) {
+      if (this.rejectSessionReady) {
+        this.rejectSessionReady(err instanceof Error ? err : new Error(String(err)));
+        this.resolveSessionReady = null;
+        this.rejectSessionReady = null;
+      }
+      throw err;
     } finally {
+      if (this.sessionReadyTimeout) clearTimeout(this.sessionReadyTimeout);
       this.connectPromise = null;
       this.connectingAppointmentId = null;
     }
@@ -335,7 +392,7 @@ class CallSessionManager {
           this.broadcastChannel = null;
         }
         this.broadcastChannel = new BroadcastChannel(`call-session-${appointmentId}`);
-        
+
         this.broadcastChannel.onmessage = async (event) => {
           const remoteSessionId = event.data?.sessionId;
           const remoteEpoch = typeof event.data?.epoch === "number" ? event.data.epoch : 1;
@@ -432,7 +489,7 @@ class CallSessionManager {
         if (!currentStore.callStartedAt) {
           currentStore._setCallStartedAt(Date.now());
         }
-        
+
         const hasSubscribedTracks = Array.from(room.remoteParticipants.values()).some((p) =>
           p.getTrackPublications().some((pub) => pub.track !== undefined && pub.isSubscribed)
         );
@@ -476,13 +533,13 @@ class CallSessionManager {
           this.log("room_kicked_duplicate_identity");
         }
         const currentStore = useCallStore.getState();
-        
+
         const terminalReasons = [
           DisconnectReason.SERVER_SHUTDOWN,
           DisconnectReason.ROOM_DELETED,
           DisconnectReason.PARTICIPANT_REMOVED
         ];
-        
+
         if (reason !== undefined && terminalReasons.includes(reason)) {
           this.setCallState("ended");
           void this.destroy();
@@ -593,7 +650,7 @@ class CallSessionManager {
 
       if (this.isDestroyed || this.room !== room) {
         this.log("connect_aborted_post_connect");
-        try { room.removeAllListeners(); room.disconnect(true); } catch {}
+        try { room.removeAllListeners(); room.disconnect(true); } catch { }
         return null;
       }
 
@@ -636,7 +693,7 @@ class CallSessionManager {
               const roomRef = this.room;
               const cameraPub = roomRef.localParticipant.getTrackPublication(Track.Source.Camera);
               const micPub = roomRef.localParticipant.getTrackPublication(Track.Source.Microphone);
-              
+
               const camTrack = cameraPub?.track;
               const micTrack = micPub?.track;
 
@@ -702,6 +759,21 @@ class CallSessionManager {
           }
         };
         document.addEventListener("visibilitychange", this.visibilityListener);
+      }
+
+      if (typeof window !== "undefined") {
+        this.onlineListener = () => {
+          this.log("browser_online_resuming_heartbeat");
+          if (this.room && this.room.state === RoomConnectionState.Connected) {
+            this.startHeartbeatWithGrace();
+          }
+        };
+        this.offlineListener = () => {
+          this.log("browser_offline_pausing_heartbeat");
+          this.stopHeartbeat();
+        };
+        window.addEventListener("online", this.onlineListener);
+        window.addEventListener("offline", this.offlineListener);
       }
 
       this.log("connect_complete");
@@ -798,7 +870,9 @@ class CallSessionManager {
       if (audio) {
         let micTrack = preCreatedTracks?.audioTrack;
         if (micTrack) {
-          const isUsable = micTrack.mediaStreamTrack.readyState === "live" && !micTrack.mediaStreamTrack.muted;
+          const isUsable = micTrack.mediaStreamTrack.readyState === "live" && 
+                           !micTrack.mediaStreamTrack.muted &&
+                           (!this.audioDeviceId || micTrack.mediaStreamTrack.getSettings().deviceId === this.audioDeviceId);
           if (!isUsable) {
             this.log("precreated_audio_track_dead_recreating");
             try {
@@ -832,6 +906,13 @@ class CallSessionManager {
           publishedTracks.push(micTrack);
           this.audioDeviceId = micTrack.mediaStreamTrack.getSettings().deviceId;
           this.log("publish_audio_success", { deviceId: this.audioDeviceId });
+          
+          micTrack.mediaStreamTrack.onended = () => {
+            this.log("audio_track_ended_watchdog_triggered");
+            if (this.room === roomRef) {
+              void this.publishTracks(true, false);
+            }
+          };
         } else {
           throw new Error("Failed to acquire audio track for publishing");
         }
@@ -866,7 +947,9 @@ class CallSessionManager {
 
         let camTrack = preCreatedTracks?.videoTrack;
         if (camTrack) {
-          const isUsable = camTrack.mediaStreamTrack.readyState === "live" && !camTrack.mediaStreamTrack.muted;
+          const isUsable = camTrack.mediaStreamTrack.readyState === "live" && 
+                           !camTrack.mediaStreamTrack.muted &&
+                           (!this.videoDeviceId || camTrack.mediaStreamTrack.getSettings().deviceId === this.videoDeviceId);
           if (!isUsable) {
             this.log("precreated_video_track_dead_recreating");
             try {
@@ -904,6 +987,13 @@ class CallSessionManager {
           publishedTracks.push(camTrack);
           this.videoDeviceId = camTrack.mediaStreamTrack.getSettings().deviceId;
           this.log("publish_video_success", { deviceId: this.videoDeviceId });
+          
+          camTrack.mediaStreamTrack.onended = () => {
+            this.log("camera_track_ended_watchdog_triggered");
+            if (this.room === roomRef) {
+              void this.publishTracks(false, true);
+            }
+          };
         } else {
           throw new Error("Failed to acquire video track for publishing");
         }
@@ -942,6 +1032,7 @@ class CallSessionManager {
     const micPub = roomRef.localParticipant.getTrackPublication(Track.Source.Microphone);
     if (camPub?.track) {
       try {
+        camPub.track.mediaStreamTrack.enabled = false;
         await roomRef.localParticipant.unpublishTrack(camPub.track);
         camPub.track.stop();
       } catch (e) {
@@ -950,12 +1041,14 @@ class CallSessionManager {
     }
     if (micPub?.track) {
       try {
+        micPub.track.mediaStreamTrack.enabled = false;
         await roomRef.localParticipant.unpublishTrack(micPub.track);
         micPub.track.stop();
       } catch (e) {
         console.warn("Failed to unpublish mic track:", e);
       }
     }
+    await sleep(100);
   }
 
   setFacingMode(mode: CameraFacingMode): void {
@@ -979,7 +1072,7 @@ class CallSessionManager {
       this.lastConnectedEventAt === null &&
       this.connectStartedAt !== null &&
       Date.now() - this.connectStartedAt > 15000;
-    
+
     const hasActiveMedia = Array.from(this.room?.remoteParticipants.values() || [])
       .some((p) => p.getTrackPublications().some((pub) => pub.isSubscribed && pub.track));
 
@@ -987,7 +1080,7 @@ class CallSessionManager {
       (this.room as any)?.engine?.pcManager?.publisher?.connectionState === "connected";
 
     const forceRecovery = isNoProgress && !hasActiveMedia && !isPeerConnectionAlive;
-    
+
     // Strict recovery filters
     if (forceRecovery) {
       this.log("forcing_recovery_from_stuck_connecting");
@@ -1097,23 +1190,21 @@ class CallSessionManager {
             this.recoveryReason = null;
             return;
           }
-          
-          // Token refresh sequence version check to prevent out-of-order token overwrite loops
+
           const currentSeq = ++this.tokenRefreshSeq;
 
-          this.tokenAbortController?.abort();
-          this.tokenAbortController = new AbortController();
-          const currentSignal = this.tokenAbortController.signal;
+          const ctrl = this.newController();
+          const currentSignal = ctrl.signal;
 
           let newToken: string;
           try {
-            newToken = await this.tokenRefresher(this.recoveryReason || undefined, { signal: currentSignal });
+            newToken = await this.safeRefreshToken(this.recoveryReason || undefined, currentSignal);
           } finally {
-            if (this.tokenAbortController?.signal === currentSignal) {
+            if (this.tokenAbortController === ctrl) {
               this.tokenAbortController = null;
             }
           }
-          
+
           if (this.isDestroyed || currentSeq !== this.tokenRefreshSeq) {
             this.log("recovery_token_stale", { attempt, currentSeq, latestSeq: this.tokenRefreshSeq });
             this.isRecovering = false;
@@ -1150,9 +1241,9 @@ class CallSessionManager {
           await this.publishTracks(hadAudio, hadVideo);
           this.checkTerminated();
           this.log("recovery_success");
-          
+
           store._setError(null);
-          
+
           this.recoveryStartedAt = null;
           this.isRecovering = false;
           this.recoveryReason = null;
@@ -1179,7 +1270,7 @@ class CallSessionManager {
       const currentStore = useCallStore.getState();
       currentStore._setError("Connection unstable. Retrying in 30 seconds...");
       this.setCallState("reconnecting");
-      
+
       this.log("recovery_cooldown");
       await sleep(30000);
     }
@@ -1226,15 +1317,27 @@ class CallSessionManager {
   private async destroyRoomOnly(): Promise<void> {
     this.stopHeartbeat();
     this.heartbeatInFlight = false;
-    
+
     // Deregister visibility listener
     if (typeof document !== "undefined" && this.visibilityListener) {
       document.removeEventListener("visibilitychange", this.visibilityListener);
       this.visibilityListener = null;
     }
 
+    if (typeof window !== "undefined") {
+      if (this.onlineListener) {
+        window.removeEventListener("online", this.onlineListener);
+        this.onlineListener = null;
+      }
+      if (this.offlineListener) {
+        window.removeEventListener("offline", this.offlineListener);
+        this.offlineListener = null;
+      }
+    }
+
     if (this.room) {
       try {
+        await this.unpublishAllTracks();
         this.room.removeAllListeners();
         this.room.disconnect(true);
       } catch (err) {
@@ -1271,7 +1374,17 @@ class CallSessionManager {
     this.activePublishRoom = null;
     this.connectPromise = null;
     this.connectingAppointmentId = null;
-    
+
+    if (this.rejectSessionReady) {
+      this.rejectSessionReady(new Error("Session destroyed"));
+      this.rejectSessionReady = null;
+      this.resolveSessionReady = null;
+    }
+    if (this.sessionReadyTimeout) {
+      clearTimeout(this.sessionReadyTimeout);
+      this.sessionReadyTimeout = null;
+    }
+
     // Reset deadlock/concurrency states
     this.connectStartedAt = null;
     this.lastConnectedEventAt = null;
@@ -1286,7 +1399,7 @@ class CallSessionManager {
     this.tokenAbortController = null;
 
     this.log("destroy");
-    
+
     this.stopHeartbeat();
 
     if (typeof window !== "undefined") {
@@ -1313,8 +1426,20 @@ class CallSessionManager {
       this.visibilityListener = null;
     }
 
+    if (typeof window !== "undefined") {
+      if (this.onlineListener) {
+        window.removeEventListener("online", this.onlineListener);
+        this.onlineListener = null;
+      }
+      if (this.offlineListener) {
+        window.removeEventListener("offline", this.offlineListener);
+        this.offlineListener = null;
+      }
+    }
+
     if (this.room) {
       try {
+        await this.unpublishAllTracks();
         this.room.removeAllListeners();
         this.room.disconnect(true);
       } catch (err) {
@@ -1370,9 +1495,17 @@ class CallSessionManager {
 
     this.log("heartbeat_start", { url });
 
+    const interval = 5000;
+    let nextTick = Date.now() + interval;
+
     const loop = () => {
       void this.sendHeartbeat(url);
-      const delay = 5000 + Math.random() * 1000;
+      
+      const now = Date.now();
+      nextTick += interval;
+      if (nextTick < now) nextTick = now + interval; // Drift protection
+      
+      const delay = Math.max(0, nextTick - now) + Math.random() * 500;
       this.heartbeatTimeout = setTimeout(loop, delay);
     };
 
@@ -1488,7 +1621,7 @@ class CallSessionManager {
               const returnedVersion = typeof data.session_version === "number" ? data.session_version : null;
               if (returnedVersion === null || returnedVersion >= this.sessionVersion) {
                 this.log("heartbeat_server_ended_pending_confirmation", { call_status: data.call_status, returnedVersion, currentVersion: this.sessionVersion });
-                
+
                 await sleep(1000);
                 this.checkTerminated();
                 try {
@@ -1543,6 +1676,15 @@ class CallSessionManager {
           } catch (err) {
             console.warn("Heartbeat retry network error:", err);
           }
+        }
+      } else if (res.status === 401 || res.status === 403) {
+        this.log("heartbeat_unauthorized_refreshing_token", { status: res.status });
+        try {
+          await this.safeRefreshToken("heartbeat_401");
+          // Re-queue heartbeat immediately after refresh
+          setTimeout(() => this.sendHeartbeat(url), 500);
+        } catch (err) {
+          this.log("token_refresh_failed", { error: String(err) });
         }
       } else if ([404, 502, 503, 504].includes(res.status)) {
         this.heartbeat404Count++;

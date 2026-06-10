@@ -558,7 +558,7 @@ function DashboardContent() {
                     <button
                       key={appointment.appointment_id}
                       onClick={() =>
-                        router.push(`/doctor/appointments?focus=${appointment.appointment_id}`)
+                        router.push(`/doctor/appointments/${appointment.appointment_id}`)
                       }
                       className="group flex w-full items-center gap-2.5 rounded-xl border border-transparent px-2.5 py-2 text-left transition-all hover:border-brand/10 hover:bg-brand-bg/50"
                     >

@@ -49,7 +49,7 @@ export function useCountdown(targetDate: string | null | undefined): CountdownRe
 
   useEffect(() => {
     if (!targetDate) return;
-    tick();
+    setTimeout(tick, 0);
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [targetDate, tick]);

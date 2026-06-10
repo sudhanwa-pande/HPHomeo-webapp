@@ -76,7 +76,7 @@ function useCardActivation(
 
   useEffect(() => {
     if (!elementRef.current || !isWithinRange) {
-      setIsCardActive(false);
+      setTimeout(() => setIsCardActive(false), 0);
       localMouseX.set(-illuminationRadius);
       localMouseY.set(-illuminationRadius);
       return;
@@ -88,7 +88,7 @@ function useCardActivation(
       globalMouseX <= rect.right + extendedProximity &&
       globalMouseY >= rect.top - extendedProximity &&
       globalMouseY <= rect.bottom + extendedProximity;
-    setIsCardActive(isNearCard);
+    setTimeout(() => setIsCardActive(isNearCard), 0);
     if (isNearCard) {
       localMouseX.set(globalMouseX - rect.left);
       localMouseY.set(globalMouseY - rect.top);
