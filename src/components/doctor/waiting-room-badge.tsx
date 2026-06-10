@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Phone, PhoneCall, User, X, Clock } from "lucide-react";
@@ -29,14 +29,53 @@ export function WaitingRoomBadge() {
     refetchInterval: false, // SSE handles updates
   });
 
-  const count = waiting?.length ?? 0;
+  const [dismissedPatients, setDismissedPatients] = useState<Set<string>>(() => {
+    if (typeof window !== "undefined") {
+      const stored = sessionStorage.getItem("dismissedPatients");
+      if (stored) {
+        try {
+          return new Set(JSON.parse(stored));
+        } catch (e) {}
+      }
+    }
+    return new Set();
+  });
+
+  const safeWaiting = useMemo(() => {
+    return waiting?.filter((a: any) => {
+      if (a.call_participants && a.call_participants.length > 0) {
+        return a.call_participants.some((p: any) => p.role === "patient" || p.role === "public");
+      }
+      return true;
+    }) || [];
+  }, [waiting]);
+
+  const visibleWaiting = useMemo(() => {
+    return safeWaiting.filter((p: any) => !dismissedPatients.has(p.appointment_id));
+  }, [safeWaiting, dismissedPatients]);
+
+  const count = visibleWaiting.length;
+
+  const handleDismiss = (appointmentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDismissedPatients((prev) => {
+      const next = new Set(prev);
+      next.add(appointmentId);
+      sessionStorage.setItem("dismissedPatients", JSON.stringify(Array.from(next)));
+      // If closing the last one, close the popover too
+      if (visibleWaiting.length <= 1) {
+        setOpen(false);
+      }
+      return next;
+    });
+  };
 
   // Play a sound / vibrate when a new patient starts waiting
   useEffect(() => {
     let timeoutId: number | undefined;
 
     if (count > prevCountRef.current && prevCountRef.current >= 0) {
-      const firstPatient = waiting?.[0];
+      const firstPatient = visibleWaiting[0];
       const appointmentId = firstPatient?.appointment_id || "";
       const patientName = firstPatient?.patient_name || "A patient";
 
@@ -66,7 +105,7 @@ export function WaitingRoomBadge() {
     return () => {
       if (timeoutId) window.clearTimeout(timeoutId);
     };
-  }, [count, waiting]);
+  }, [count, visibleWaiting]);
 
   // Request notification permission on mount
   useEffect(() => {
@@ -136,10 +175,10 @@ export function WaitingRoomBadge() {
           </div>
 
           <div className="max-h-64 overflow-y-auto divide-y divide-border/10">
-            {waiting?.map((patient) => (
+            {visibleWaiting.map((patient: any) => (
               <div
                 key={patient.appointment_id}
-                className="px-3 py-2.5 transition-colors hover:bg-brand-bg/50"
+                className="group relative px-3 py-2.5 transition-colors hover:bg-brand-bg/50"
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
@@ -163,18 +202,27 @@ export function WaitingRoomBadge() {
                       <span className="text-emerald-600 font-medium">Waiting</span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      setOpen(false);
-                      router.push(
-                        `/doctor/call/${patient.appointment_id}`
-                      );
-                    }}
-                    className="flex shrink-0 items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-[10px] font-semibold text-white transition-colors hover:bg-emerald-600"
-                  >
-                    <Phone className="h-3 w-3" />
-                    Join
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      onClick={(e) => handleDismiss(patient.appointment_id, e)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-brand-subtext transition-colors hover:bg-red-100 hover:text-red-600 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      title="Dismiss notification"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setOpen(false);
+                        router.push(
+                          `/doctor/call/${patient.appointment_id}`
+                        );
+                      }}
+                      className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-[10px] font-semibold text-white transition-colors hover:bg-emerald-600"
+                    >
+                      <Phone className="h-3 w-3" />
+                      Join
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

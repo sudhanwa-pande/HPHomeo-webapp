@@ -74,13 +74,26 @@ export function useEventStream({
   // Keep handlers in a ref so reconnections always use latest handlers
   // without re-triggering the effect.
   const handlersRef = useRef(onEvent);
-  handlersRef.current = onEvent;
-
   const onAnyRef = useRef(onAnyEvent);
-  onAnyRef.current = onAnyEvent;
-
   const onReconnectRef = useRef(onReconnect);
-  onReconnectRef.current = onReconnect;
+  const keepAliveRef = useRef(keepAlive);
+  const connectRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    handlersRef.current = onEvent;
+  }, [onEvent]);
+
+  useEffect(() => {
+    onAnyRef.current = onAnyEvent;
+  }, [onAnyEvent]);
+
+  useEffect(() => {
+    onReconnectRef.current = onReconnect;
+  }, [onReconnect]);
+
+  useEffect(() => {
+    keepAliveRef.current = keepAlive;
+  }, [keepAlive]);
 
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -99,8 +112,6 @@ export function useEventStream({
   // Set to false on cleanup — guards against zombie connections from async
   // operations (auth refresh) that resolve after the hook has unmounted.
   const mountedRef = useRef(true);
-  const keepAliveRef = useRef(keepAlive);
-  keepAliveRef.current = keepAlive;
 
   const disconnect = useCallback(() => {
     if (retryTimerRef.current) {
@@ -174,7 +185,7 @@ export function useEventStream({
         .then(() => {
           if (!mountedRef.current) return; // component unmounted during refresh
           retryCountRef.current = 0;
-          setTimeout(connect, 0);
+          setTimeout(connectRef.current, 0);
         })
         .catch(() => {
           if (!mountedRef.current) return;
@@ -202,7 +213,7 @@ export function useEventStream({
       }
       retryTimerRef.current = setTimeout(() => {
         retryTimerRef.current = null;
-        connect();
+        connectRef.current();
       }, delay);
     });
 
@@ -259,7 +270,7 @@ export function useEventStream({
 
       retryTimerRef.current = setTimeout(() => {
         retryTimerRef.current = null;
-        connect();
+        connectRef.current();
       }, delay);
     };
 
@@ -267,9 +278,19 @@ export function useEventStream({
   }, [path]);
 
   useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
     if (!enabled) return;
 
-    connect();
+    const connectTimer = setTimeout(() => {
+      if (mountedRef.current) {
+        connect();
+      }
+    }, 0);
 
     // Pause SSE when the tab is hidden to prevent phantom connections
     // that hold Redis pubsub slots while the user isn't looking.
@@ -293,9 +314,8 @@ export function useEventStream({
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
-    mountedRef.current = true;
-
     return () => {
+      clearTimeout(connectTimer);
       mountedRef.current = false;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       disconnect();

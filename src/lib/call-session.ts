@@ -1030,22 +1030,34 @@ class CallSessionManager {
     this.log("unpublishing_all_tracks_media_policy");
     const camPub = roomRef.localParticipant.getTrackPublication(Track.Source.Camera);
     const micPub = roomRef.localParticipant.getTrackPublication(Track.Source.Microphone);
-    if (camPub?.track) {
-      try {
-        camPub.track.mediaStreamTrack.enabled = false;
-        await roomRef.localParticipant.unpublishTrack(camPub.track);
-        camPub.track.stop();
-      } catch (e) {
-        console.warn("Failed to unpublish camera track:", e);
+    
+    if (camPub) {
+      const track = camPub.track;
+      if (track) {
+        try {
+          track.mediaStreamTrack.enabled = false;
+          await roomRef.localParticipant.unpublishTrack(track);
+          if (typeof track.stop === "function") {
+            track.stop();
+          }
+        } catch (e) {
+          console.warn("Failed to unpublish camera track:", e);
+        }
       }
     }
-    if (micPub?.track) {
-      try {
-        micPub.track.mediaStreamTrack.enabled = false;
-        await roomRef.localParticipant.unpublishTrack(micPub.track);
-        micPub.track.stop();
-      } catch (e) {
-        console.warn("Failed to unpublish mic track:", e);
+    
+    if (micPub) {
+      const track = micPub.track;
+      if (track) {
+        try {
+          track.mediaStreamTrack.enabled = false;
+          await roomRef.localParticipant.unpublishTrack(track);
+          if (typeof track.stop === "function") {
+            track.stop();
+          }
+        } catch (e) {
+          console.warn("Failed to unpublish mic track:", e);
+        }
       }
     }
     await sleep(100);
@@ -1587,9 +1599,16 @@ class CallSessionManager {
 
             // Handle control plane terminate instruction (e.g. fenced out, or call ended)
             if (data.terminate === true || data.status === "terminated") {
-              this.log("heartbeat_terminate_requested", { data });
+              if (data.reason === "lost_ownership" || data.reason === "stale_epoch") {
+                this.log("heartbeat_lost_ownership", { data });
+                const store = useCallStore.getState();
+                store._setError("Call active in another window (lost ownership)");
+                notifyError("Session taken over in another tab");
+              } else {
+                this.log("heartbeat_terminate_requested", { data });
+                notifyError("Connection terminated by server");
+              }
               this.setCallState("ended");
-              notifyError("Connection terminated by server");
               void this.destroy();
               return;
             }

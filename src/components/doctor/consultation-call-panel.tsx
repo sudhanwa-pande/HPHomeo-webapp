@@ -226,73 +226,7 @@ export function ConsultationCallPanel({
     return () => window.removeEventListener("orientationchange", onOrientationChange);
   }, [calculateBounds]);
 
-  // Periodic doctor heartbeat loop when in active call inside ConsultationCallPanel
-  useEffect(() => {
-    if (!tokenData || !tokenData.token) return;
 
-    let sessionVersion: number | null = null;
-    try {
-      const base64Url = tokenData.token.split(".")[1];
-      if (base64Url) {
-        const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-        const jsonPayload = typeof window !== "undefined"
-          ? decodeURIComponent(
-              window.atob(base64)
-                .split("")
-                .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-                .join("")
-            )
-          : Buffer.from(base64, "base64").toString("utf8");
-        const payload = JSON.parse(jsonPayload);
-        if (payload && typeof payload.metadata === "string") {
-          const meta = JSON.parse(payload.metadata);
-          if (typeof meta.session_version === "number") {
-            sessionVersion = meta.session_version;
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to extract session version from token:", e);
-    }
-
-    if (sessionVersion === null) return;
-
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
-    const url = `${baseUrl}/doctor/appointments/${appointmentId}/call/heartbeat`;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-
-    const sendHeartbeat = () => {
-      fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ session_version: sessionVersion }),
-        credentials: "include",
-      })
-        .then((res) => {
-          if (!res.ok) {
-            console.warn(`Doctor call panel heartbeat response not OK: ${res.status}`);
-          }
-        })
-        .catch((err) => {
-          console.warn("Doctor call panel heartbeat network error:", err);
-        });
-    };
-
-    const loop = () => {
-      sendHeartbeat();
-      const delay = 5000 + Math.random() * 1000;
-      timerId = setTimeout(loop, delay);
-    };
-
-    // Start heartbeat loop immediately
-    loop();
-
-    return () => {
-      if (timerId) clearTimeout(timerId);
-    };
-  }, [tokenData, appointmentId]);
 
   // Keyboard detection (hybrid with debounce) & Atomic bounds recalculation
   useEffect(() => {
