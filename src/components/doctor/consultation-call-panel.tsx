@@ -281,7 +281,8 @@ export function ConsultationCallPanel({
   const canStartConsultation =
     appointment.mode === "online" &&
     appointment.video_enabled &&
-    appointment.status === "confirmed";
+    appointment.status === "confirmed" &&
+    appointment.call_status !== "ended";
   const consultationLabel =
     appointment.call_status === "waiting" ||
     appointment.call_status === "connected" ||

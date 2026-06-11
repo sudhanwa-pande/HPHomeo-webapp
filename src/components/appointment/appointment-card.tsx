@@ -69,10 +69,8 @@ export function AppointmentCard({
   const reschedulable = canReschedule(apt);
   const needsPay =
     apt.status === "pending_payment" && apt.payment_choice === "pay_now";
-  const isUpcoming =
-    apt.status === "confirmed" &&
-    new Date(apt.scheduled_at).getTime() > Date.now();
-  const countdown = useCountdown(isUpcoming ? apt.scheduled_at : null);
+  const countdown = useCountdown(apt.status === "confirmed" ? apt.scheduled_at : null);
+  const isUpcoming = apt.status === "confirmed" && !countdown.isExpired;
 
   const handleClick = () => {
     router.push(`/patient/appointments/${apt.appointment_id}`);

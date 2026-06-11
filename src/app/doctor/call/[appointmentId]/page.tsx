@@ -276,7 +276,8 @@ function CallRoomContent() {
     appointment &&
     appointment.mode === "online" &&
     appointment.video_enabled &&
-    appointment.status === "confirmed";
+    appointment.status === "confirmed" &&
+    appointment.call_status !== "ended";
 
   if (!canStartCall && !showEnded) {
     return (
@@ -436,10 +437,12 @@ function ActiveCallWorkspaceWrapper({
       remoteWaitingTitle={appointment.patient?.full_name ? `Waiting for ${appointment.patient.full_name}` : "Waiting for patient"}
       remoteWaitingDescription="The patient will appear here when they join the consultation room."
       onBack={() => router.push(`/doctor/appointments/${appointmentId}`)}
-      onLeave={() => endCallMutation.mutate()}
+      onLeave={() => {
+        void callSession.disconnect();
+        router.push(`/doctor/appointments/${appointmentId}`);
+      }}
       tokenRefresher={tokenRefresher}
-      endLoading={endCallMutation.isPending}
-      endLabel="End consultation"
+      endLabel="Leave consultation"
       allowScreenShare
       allowCameraSwitch
       preferredFacingMode={preferredFacingMode}
