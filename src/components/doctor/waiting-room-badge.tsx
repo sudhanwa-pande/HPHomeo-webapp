@@ -29,29 +29,37 @@ export function WaitingRoomBadge() {
     refetchInterval: false, // SSE handles updates
   });
 
-  const [dismissedPatients, setDismissedPatients] = useState<Set<string>>(() => {
-    if (typeof window !== "undefined") {
-      const stored = sessionStorage.getItem("dismissedPatients");
-      if (stored) {
-        try {
-          return new Set(JSON.parse(stored));
-        } catch (e) {}
+  const [dismissedPatients, setDismissedPatients] = useState<Set<string>>(
+    () => {
+      if (typeof window !== "undefined") {
+        const stored = sessionStorage.getItem("dismissedPatients");
+        if (stored) {
+          try {
+            return new Set(JSON.parse(stored));
+          } catch (e) {}
+        }
       }
-    }
-    return new Set();
-  });
+      return new Set();
+    },
+  );
 
   const safeWaiting = useMemo(() => {
-    return waiting?.filter((a: any) => {
-      if (a.call_participants && a.call_participants.length > 0) {
-        return a.call_participants.some((p: any) => p.role === "patient" || p.role === "public");
-      }
-      return true;
-    }) || [];
+    return (
+      waiting?.filter((a: any) => {
+        if (a.call_participants && a.call_participants.length > 0) {
+          return a.call_participants.some(
+            (p: any) => p.role === "patient" || p.role === "public",
+          );
+        }
+        return true;
+      }) || []
+    );
   }, [waiting]);
 
   const visibleWaiting = useMemo(() => {
-    return safeWaiting.filter((p: any) => !dismissedPatients.has(p.appointment_id));
+    return safeWaiting.filter(
+      (p: any) => !dismissedPatients.has(p.appointment_id),
+    );
   }, [safeWaiting, dismissedPatients]);
 
   const count = visibleWaiting.length;
@@ -61,7 +69,10 @@ export function WaitingRoomBadge() {
     setDismissedPatients((prev) => {
       const next = new Set(prev);
       next.add(appointmentId);
-      sessionStorage.setItem("dismissedPatients", JSON.stringify(Array.from(next)));
+      sessionStorage.setItem(
+        "dismissedPatients",
+        JSON.stringify(Array.from(next)),
+      );
       // If closing the last one, close the popover too
       if (visibleWaiting.length <= 1) {
         setOpen(false);
@@ -82,7 +93,11 @@ export function WaitingRoomBadge() {
       if (shouldNotifyAppointment(appointmentId)) {
         let browserNotificationShown = false;
         // Browser notification (if permission granted)
-        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+        if (
+          typeof window !== "undefined" &&
+          "Notification" in window &&
+          Notification.permission === "granted"
+        ) {
           try {
             new Notification("Patient Waiting", {
               body: `${patientName} is waiting for your call.`,
@@ -96,7 +111,10 @@ export function WaitingRoomBadge() {
 
         // Fallback UI toast trigger if browser notification was not shown
         if (!browserNotificationShown) {
-          notifyInfo("Patient waiting", `${patientName} has joined the waiting room.`);
+          notifyInfo(
+            "Patient waiting",
+            `${patientName} has joined the waiting room.`,
+          );
         }
       }
       timeoutId = window.setTimeout(() => setOpen(true), 0);
@@ -109,7 +127,11 @@ export function WaitingRoomBadge() {
 
   // Request notification permission on mount
   useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+    if (
+      typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission === "default"
+    ) {
       try {
         Notification.requestPermission().catch((err) => {
           console.warn("notification_permission_failed", err);
@@ -123,7 +145,10 @@ export function WaitingRoomBadge() {
   // Close popover when clicking outside
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     }
@@ -192,14 +217,19 @@ export function WaitingRoomBadge() {
                       <span className="flex items-center gap-0.5">
                         <Clock className="h-2.5 w-2.5" />
                         {patient.scheduled_at
-                          ? new Date(patient.scheduled_at).toLocaleTimeString("en-IN", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
+                          ? new Date(patient.scheduled_at).toLocaleTimeString(
+                              "en-IN",
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              },
+                            )
                           : "—"}
                       </span>
                       <span className="flex h-1 w-1 rounded-full bg-emerald-400 animate-pulse" />
-                      <span className="text-emerald-600 font-medium">Waiting</span>
+                      <span className="text-emerald-600 font-medium">
+                        Waiting
+                      </span>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -214,7 +244,7 @@ export function WaitingRoomBadge() {
                       onClick={() => {
                         setOpen(false);
                         router.push(
-                          `/doctor/call/${patient.appointment_id}`
+                          `/doctor/appointments/${patient.appointment_id}?step=consultation`,
                         );
                       }}
                       className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-[10px] font-semibold text-white transition-colors hover:bg-emerald-600"
@@ -245,4 +275,3 @@ export function WaitingRoomBadge() {
     </div>
   );
 }
-

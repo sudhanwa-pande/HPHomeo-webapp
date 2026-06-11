@@ -1,9 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { sileo } from "sileo";
-
-type ToastVariant = "default" | "success" | "error" | "info" | "warning" | "loading";
+import { toast as sonnerToast } from "sonner";
 
 interface ToastAction {
   label: string;
@@ -14,100 +12,81 @@ interface ToastOptions {
   description?: ReactNode | string;
   duration?: number | null;
   action?: ToastAction;
+  id?: string;
 }
 
-function buildToastOptions(
-  variant: ToastVariant,
-  title: string,
-  options?: ToastOptions,
-) {
+function buildSonnerOptions(options?: ToastOptions, fallbackId?: string) {
   return {
-    title,
-    type: variant === "default" ? "info" : variant,
     description: options?.description,
-    duration: options?.duration,
-    fill: "#ffffff",
-    roundness: 20,
-    autopilot: { expand: 120, collapse: 3800 },
-    styles: {
-      title: "sileo-modern-title",
-      description: "sileo-modern-description",
-      badge: "sileo-modern-badge",
-      button: "sileo-modern-button",
-    },
-    button: options?.action
+    duration: options?.duration === null ? Infinity : options?.duration,
+    id: options?.id || fallbackId,
+    action: options?.action
       ? {
-          title: options.action.label,
+          label: options.action.label,
           onClick: options.action.onClick,
         }
       : undefined,
-  } as const;
+  };
 }
 
 export const toast = {
   show(title: string, options?: ToastOptions) {
-    return sileo.show(buildToastOptions("default", title, options));
+    return sonnerToast(title, buildSonnerOptions(options));
   },
   success(title: string, options?: ToastOptions) {
-    return sileo.success(buildToastOptions("success", title, options));
+    return sonnerToast.success(title, buildSonnerOptions(options));
   },
   error(title: string, options?: ToastOptions) {
-    return sileo.error(buildToastOptions("error", title, options));
+    // Enforce deduplication with composite key: ${title}-${description ?? "no-desc"}
+    const fallbackId = `${title}-${options?.description || "no-desc"}`;
+    return sonnerToast.error(title, buildSonnerOptions(options, fallbackId));
   },
   info(title: string, options?: ToastOptions) {
-    return sileo.info(buildToastOptions("info", title, options));
+    return sonnerToast.info(title, buildSonnerOptions(options));
   },
   warning(title: string, options?: ToastOptions) {
-    return sileo.warning(buildToastOptions("warning", title, options));
+    return sonnerToast.warning(title, buildSonnerOptions(options));
   },
   loading(title: string, options?: ToastOptions) {
-    return sileo.show(buildToastOptions("loading", title, { ...options, duration: null }));
+    return sonnerToast.loading(title, buildSonnerOptions(options));
   },
-  dismiss(id: string) {
-    sileo.dismiss(id);
+  dismiss(id?: string) {
+    sonnerToast.dismiss(id);
   },
   clear() {
-    sileo.clear();
+    sonnerToast.dismiss();
   },
   promise<T>(
     promise: Promise<T> | (() => Promise<T>),
     labels: {
       loading: { title: string; description?: ReactNode | string };
-      success: { title: string; description?: ReactNode | string } | ((data: T) => { title: string; description?: ReactNode | string });
-      error: { title: string; description?: ReactNode | string } | ((error: unknown) => { title: string; description?: ReactNode | string });
+      success:
+        | { title: string; description?: ReactNode | string }
+        | ((data: T) => { title: string; description?: ReactNode | string });
+      error:
+        | { title: string; description?: ReactNode | string }
+        | ((error: unknown) => {
+            title: string;
+            description?: ReactNode | string;
+          });
     },
   ) {
-    const successOptions =
-      typeof labels.success === "function"
-        ? (data: T) => {
-            const result = (labels.success as (data: T) => { title: string; description?: ReactNode | string })(data);
-            return buildToastOptions("success", result.title, {
-              description: result.description,
-            });
-          }
-        : buildToastOptions("success", labels.success.title, {
-            description: labels.success.description,
-          });
+    const loadingMessage = labels.loading.title;
 
-    const errorOptions =
-      typeof labels.error === "function"
-        ? (error: unknown) => {
-            const result = (labels.error as (error: unknown) => { title: string; description?: ReactNode | string })(error);
-            return buildToastOptions("error", result.title, {
-              description: result.description,
-            });
-          }
-        : buildToastOptions("error", labels.error.title, {
-            description: labels.error.description,
-          });
-
-    return sileo.promise(promise, {
-      loading: buildToastOptions("loading", labels.loading.title, {
-        description: labels.loading.description,
-        duration: null,
-      }),
-      success: successOptions,
-      error: errorOptions,
+    return sonnerToast.promise(promise, {
+      loading: loadingMessage,
+      success: (data) => {
+        const res =
+          typeof labels.success === "function"
+            ? labels.success(data)
+            : labels.success;
+        return res.title;
+      },
+      error: (err) => {
+        const res =
+          typeof labels.error === "function" ? labels.error(err) : labels.error;
+        return res.title;
+      },
     });
   },
 };

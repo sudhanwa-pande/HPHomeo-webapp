@@ -58,7 +58,6 @@ import {
 } from "@/components/ui/dialog";
 import type { DoctorAppointment } from "@/types/doctor";
 
-
 /* ─── helpers ───────────────────────────────────────────────────── */
 
 function getPaymentLabel(a: DoctorAppointment) {
@@ -87,7 +86,12 @@ const TABS: { key: TabKey; label: string; icon: typeof Calendar }[] = [
   { key: "cancelled", label: "Cancelled", icon: XCircle },
 ];
 
-type QuickFilter = "all" | "online" | "walk_in" | "needs_rx" | "payment_pending";
+type QuickFilter =
+  | "all"
+  | "online"
+  | "walk_in"
+  | "needs_rx"
+  | "payment_pending";
 
 const QUICK_FILTERS: { key: QuickFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -194,7 +198,9 @@ function AppointmentsContent() {
 
   const refreshData = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range", fromStr, toStr] }),
+      queryClient.invalidateQueries({
+        queryKey: ["doctor-appointments-range", fromStr, toStr],
+      }),
       queryClient.invalidateQueries({ queryKey: ["doctor-stats"] }),
     ]);
   }, [queryClient, fromStr, toStr]);
@@ -245,8 +251,12 @@ function AppointmentsContent() {
       }
     };
 
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchmove", handleTouchMove, { passive: false });
+    container.addEventListener("touchstart", handleTouchStart, {
+      passive: true,
+    });
+    container.addEventListener("touchmove", handleTouchMove, {
+      passive: false,
+    });
     container.addEventListener("touchend", handleTouchEnd, { passive: true });
 
     return () => {
@@ -260,7 +270,8 @@ function AppointmentsContent() {
   const sorted = useMemo(() => {
     if (!appointments) return [];
     return [...appointments].sort(
-      (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime(),
+      (a, b) =>
+        new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime(),
     );
   }, [appointments]);
 
@@ -285,7 +296,9 @@ function AppointmentsContent() {
               a.status !== "no_show"),
         );
       case "cancelled":
-        return sorted.filter((a) => a.status === "cancelled" || a.status === "no_show");
+        return sorted.filter(
+          (a) => a.status === "cancelled" || a.status === "no_show",
+        );
       default:
         return sorted;
     }
@@ -294,12 +307,19 @@ function AppointmentsContent() {
   // Quick filters
   const quickFiltered = useMemo(() => {
     let result = tabFiltered;
-    if (quickFilter === "online") result = result.filter((a) => a.mode === "online");
-    else if (quickFilter === "walk_in") result = result.filter((a) => a.mode === "walk_in");
+    if (quickFilter === "online")
+      result = result.filter((a) => a.mode === "online");
+    else if (quickFilter === "walk_in")
+      result = result.filter((a) => a.mode === "walk_in");
     else if (quickFilter === "needs_rx")
-      result = result.filter((a) => a.prescription_status === "none" || a.prescription_status === "draft");
+      result = result.filter(
+        (a) =>
+          a.prescription_status === "none" || a.prescription_status === "draft",
+      );
     else if (quickFilter === "payment_pending")
-      result = result.filter((a) => a.payment_status === "pending" || a.payment_status === "unpaid");
+      result = result.filter(
+        (a) => a.payment_status === "pending" || a.payment_status === "unpaid",
+      );
     return result;
   }, [tabFiltered, quickFilter]);
 
@@ -325,7 +345,9 @@ function AppointmentsContent() {
     const total = todayAll.length;
     const completed = todayAll.filter((a) => a.status === "completed").length;
     const upcoming = todayAll.filter(
-      (a) => ["confirmed", "pending_payment", "rescheduled"].includes(a.status) && isAfter(parseISO(a.scheduled_at), now),
+      (a) =>
+        ["confirmed", "pending_payment", "rescheduled"].includes(a.status) &&
+        isAfter(parseISO(a.scheduled_at), now),
     ).length;
     const noShows = todayAll.filter((a) => a.status === "no_show").length;
     return { total, completed, upcoming, noShows };
@@ -335,14 +357,22 @@ function AppointmentsContent() {
   const upNext = useMemo(() => {
     const todayConfirmed = todayAll
       .filter((a) => a.status === "confirmed")
-      .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
-    return todayConfirmed.find((a) => isAfter(parseISO(a.scheduled_at), now)) ?? todayConfirmed[0] ?? null;
+      .sort(
+        (a, b) =>
+          new Date(a.scheduled_at).getTime() -
+          new Date(b.scheduled_at).getTime(),
+      );
+    return (
+      todayConfirmed.find((a) => isAfter(parseISO(a.scheduled_at), now)) ??
+      todayConfirmed[0] ??
+      null
+    );
   }, [todayAll, now]);
 
   const minutesDiff = useMemo(() => {
     if (!upNext) return 0;
     return Math.round(
-      (parseISO(upNext.scheduled_at).getTime() - now.getTime()) / 60000
+      (parseISO(upNext.scheduled_at).getTime() - now.getTime()) / 60000,
     );
   }, [upNext, now]);
 
@@ -366,152 +396,196 @@ function AppointmentsContent() {
   }, [filtered, activeTab]);
 
   // Navigate to detail page
-  const openDetail = useCallback((id: string) => {
-    router.push(`/doctor/appointments/${id}`);
-  }, [router]);
+  const openDetail = useCallback(
+    (id: string) => {
+      router.push(`/doctor/appointments/${id}`);
+    },
+    [router],
+  );
 
   /* ─── table columns (for table view) ──────────────────────────── */
-  const columns: ColumnDef<DoctorAppointment>[] = useMemo(() => [
-    {
-      accessorKey: "patient.full_name",
-      header: "Patient",
-      cell: ({ row }) => {
-        const a = row.original;
-        const initials = getInitials(a.patient.full_name);
-        return (
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand/20 to-brand/5 text-[11px] font-bold text-brand">
-              {initials}
+  const columns: ColumnDef<DoctorAppointment>[] = useMemo(
+    () => [
+      {
+        accessorKey: "patient.full_name",
+        header: "Patient",
+        cell: ({ row }) => {
+          const a = row.original;
+          const initials = getInitials(a.patient.full_name);
+          return (
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand/20 to-brand/5 text-[11px] font-bold text-brand">
+                {initials}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-brand-dark">
+                  {a.patient.full_name}
+                </p>
+                <p className="text-xs text-brand-subtext">
+                  {a.patient.age ? `${a.patient.age}y` : "-"}
+                  {a.patient.sex ? ` / ${a.patient.sex}` : ""}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-brand-dark">
-                {a.patient.full_name}
+          );
+        },
+      },
+      {
+        accessorKey: "scheduled_at",
+        header: "Scheduled",
+        cell: ({ row }) => {
+          const dt = parseISO(row.original.scheduled_at);
+          return (
+            <div>
+              <p className="text-sm font-semibold text-brand-dark">
+                {format(dt, "hh:mm a")}
               </p>
               <p className="text-xs text-brand-subtext">
-                {a.patient.age ? `${a.patient.age}y` : "-"}
-                {a.patient.sex ? ` / ${a.patient.sex}` : ""}
+                {format(dt, "dd MMM yyyy")}
               </p>
             </div>
-          </div>
-        );
+          );
+        },
       },
-    },
-    {
-      accessorKey: "scheduled_at",
-      header: "Scheduled",
-      cell: ({ row }) => {
-        const dt = parseISO(row.original.scheduled_at);
-        return (
+      {
+        accessorKey: "mode",
+        header: "Mode",
+        cell: ({ row }) => (
+          <StatusBadge variant={row.original.mode} dot size="xs" />
+        ),
+      },
+      {
+        accessorKey: "fee",
+        header: "Payment",
+        cell: ({ row }) => (
           <div>
             <p className="text-sm font-semibold text-brand-dark">
-              {format(dt, "hh:mm a")}
+              ₹ {(row.original.fee || 0).toLocaleString("en-IN")}
             </p>
-            <p className="text-xs text-brand-subtext">{format(dt, "dd MMM yyyy")}</p>
+            <p className="text-xs text-brand-subtext">
+              {getPaymentLabel(row.original)}
+            </p>
           </div>
-        );
+        ),
       },
-    },
-    {
-      accessorKey: "mode",
-      header: "Mode",
-      cell: ({ row }) => <StatusBadge variant={row.original.mode} dot size="xs" />,
-    },
-    {
-      accessorKey: "fee",
-      header: "Payment",
-      cell: ({ row }) => (
-        <div>
-          <p className="text-sm font-semibold text-brand-dark">
-            ₹ {(row.original.fee || 0).toLocaleString("en-IN")}
-          </p>
-          <p className="text-xs text-brand-subtext">{getPaymentLabel(row.original)}</p>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ row }) => {
-        const a = row.original;
-        const waiting =
-          a.video_enabled && a.mode === "online" && a.call_status === "waiting";
-        return (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <StatusBadge
-              variant={a.status as "confirmed" | "completed" | "cancelled" | "no_show" | "pending_payment"}
-              className="rounded-xl"
-            />
-            {waiting && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                Waiting
-              </span>
-            )}
-          </div>
-        );
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => {
+          const a = row.original;
+          const waiting =
+            a.video_enabled &&
+            a.mode === "online" &&
+            a.call_status === "waiting";
+          return (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <StatusBadge
+                variant={
+                  a.status as
+                    | "confirmed"
+                    | "completed"
+                    | "cancelled"
+                    | "no_show"
+                    | "pending_payment"
+                }
+                className="rounded-xl"
+              />
+              {waiting && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                  Waiting
+                </span>
+              )}
+            </div>
+          );
+        },
       },
-    },
-    {
-      accessorKey: "prescription_status",
-      header: "Rx",
-      cell: ({ row }) => {
-        const s = row.original.prescription_status ?? "none";
-        if (s === "final") return <StatusBadge variant="final" className="rounded-xl" label="Finalized" />;
-        if (s === "draft") return <StatusBadge variant="draft" className="rounded-xl" label="Draft" />;
-        return <span className="text-xs text-brand-subtext">—</span>;
+      {
+        accessorKey: "prescription_status",
+        header: "Rx",
+        cell: ({ row }) => {
+          const s = row.original.prescription_status ?? "none";
+          if (s === "final")
+            return (
+              <StatusBadge
+                variant="final"
+                className="rounded-xl"
+                label="Finalized"
+              />
+            );
+          if (s === "draft")
+            return (
+              <StatusBadge
+                variant="draft"
+                className="rounded-xl"
+                label="Draft"
+              />
+            );
+          return <span className="text-xs text-brand-subtext">—</span>;
+        },
       },
-    },
-    {
-      id: "actions",
-      header: "",
-      enableSorting: false,
-      cell: ({ row }) => {
-        const a = row.original;
-        const isWaiting =
-          a.video_enabled && a.mode === "online" && (a.call_status === "waiting" || a.call_status === "connected" || a.call_status === "disconnected");
-        return (
-          <div className="flex items-center gap-1.5">
-            {isWaiting && (
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const a = row.original;
+          const isWaiting =
+            a.video_enabled &&
+            a.mode === "online" &&
+            (a.call_status === "waiting" ||
+              a.call_status === "connected" ||
+              a.call_status === "disconnected");
+          return (
+            <div className="flex items-center gap-1.5">
+              {isWaiting && (
+                <Button
+                  size="sm"
+                  className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(
+                      `/doctor/appointments/${a.appointment_id}?step=consultation`,
+                    );
+                  }}
+                >
+                  <Phone className="h-3.5 w-3.5" />
+                  {a.call_status === "connected" ||
+                  a.call_status === "disconnected"
+                    ? "Rejoin"
+                    : "Join"}
+                </Button>
+              )}
               <Button
+                variant="ghost"
                 size="sm"
-                className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+                className="rounded-xl text-brand-subtext hover:text-brand-dark"
                 onClick={(e) => {
                   e.stopPropagation();
-                  router.push(`/doctor/call/${a.appointment_id}`);
+                  openDetail(a.appointment_id);
                 }}
               >
-                <Phone className="h-3.5 w-3.5" />
-                {a.call_status === "connected" || a.call_status === "disconnected" ? "Rejoin" : "Join"}
+                <Eye className="h-3.5 w-3.5" />
+                View
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="rounded-xl text-brand-subtext hover:text-brand-dark"
-              onClick={(e) => {
-                e.stopPropagation();
-                openDetail(a.appointment_id);
-              }}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              View
-            </Button>
-          </div>
-        );
+            </div>
+          );
+        },
       },
-    },
-  ], [router, openDetail]);
+    ],
+    [router, openDetail],
+  );
 
   return (
     <DoctorShell title="Appointments" subtitle={format(now, "EEEE, dd MMMM")}>
       <div ref={containerRef} className="page-stack space-y-6">
         {/* Pull to refresh indicator */}
         {(pullDistance > 0 || isRefreshing) && (
-          <div 
-            style={{ 
-              height: isRefreshing ? 50 : pullDistance, 
+          <div
+            style={{
+              height: isRefreshing ? 50 : pullDistance,
               opacity: isRefreshing ? 1 : Math.min(pullDistance / 50, 1),
-              marginBottom: isRefreshing || pullDistance > 0 ? 12 : 0
+              marginBottom: isRefreshing || pullDistance > 0 ? 12 : 0,
             }}
             className="flex items-center justify-center overflow-hidden transition-all duration-150"
           >
@@ -611,22 +685,24 @@ function AppointmentsContent() {
                       {format(parseISO(upNext.scheduled_at), "hh:mm a")}
                     </span>
                     {/* Live countdown timer */}
-                    <span className={cn(
-                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all duration-300",
-                      minutesDiff > 0 && minutesDiff <= 15
-                        ? "bg-amber-100 text-amber-700 animate-pulse"
-                        : minutesDiff <= 0
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-brand-bg text-brand-subtext"
-                    )}>
-                      <Clock className="h-2.5 w-2.5" />
-                      {minutesDiff > 0 ? (
-                        minutesDiff < 60 ? `in ${minutesDiff}m` : `in ${Math.floor(minutesDiff / 60)}h ${minutesDiff % 60}m`
-                      ) : (
-                        Math.abs(minutesDiff) < (upNext.duration_min || 15)
-                          ? `started ${Math.abs(minutesDiff)}m ago`
-                          : `overdue by ${Math.abs(minutesDiff)}m`
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all duration-300",
+                        minutesDiff > 0 && minutesDiff <= 15
+                          ? "bg-amber-100 text-amber-700 animate-pulse"
+                          : minutesDiff <= 0
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-brand-bg text-brand-subtext",
                       )}
+                    >
+                      <Clock className="h-2.5 w-2.5" />
+                      {minutesDiff > 0
+                        ? minutesDiff < 60
+                          ? `in ${minutesDiff}m`
+                          : `in ${Math.floor(minutesDiff / 60)}h ${minutesDiff % 60}m`
+                        : Math.abs(minutesDiff) < (upNext.duration_min || 15)
+                          ? `started ${Math.abs(minutesDiff)}m ago`
+                          : `overdue by ${Math.abs(minutesDiff)}m`}
                     </span>
                   </div>
                   <p className="mt-1 truncate text-base font-semibold text-brand-dark">
@@ -652,7 +728,11 @@ function AppointmentsContent() {
                 {upNext.call_status === "waiting" && (
                   <Button
                     className="w-full rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
-                    onClick={() => router.push(`/doctor/call/${upNext.appointment_id}`)}
+                    onClick={() =>
+                      router.push(
+                        `/doctor/appointments/${upNext.appointment_id}?step=consultation`,
+                      )
+                    }
                   >
                     <Phone className="h-4 w-4" />
                     Join Call
@@ -675,7 +755,7 @@ function AppointmentsContent() {
         <div className="space-y-4">
           {/* Tab bar */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div 
+            <div
               role="tablist"
               aria-label="Appointment categories"
               className="inline-flex max-w-full items-center overflow-x-auto scrollbar-hide rounded-2xl border border-border/60 bg-white p-1"
@@ -790,7 +870,7 @@ function AppointmentsContent() {
 
         {/* ─── Content area ──────────────────────────────────── */}
         <AnimatePresence mode="wait">
-          <motion.div 
+          <motion.div
             key={`${activeTab}-${viewMode}`}
             role="tabpanel"
             id={`tabpanel-${activeTab}`}
@@ -801,117 +881,133 @@ function AppointmentsContent() {
             transition={{ duration: 0.2 }}
             className="space-y-6"
           >
-          {viewMode === "cards" ? (
-            <div className="space-y-6">
-              {isLoading ? (
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <AgendaCardSkeleton key={i} />
-                  ))}
-                </div>
-              ) : filtered.length === 0 ? (
-                <EmptyState tab={activeTab} />
-              ) : activeTab === "today" && todayGrouped.length > 0 ? (
-                // Grouped agenda view for Today
-                todayGrouped.map((group) => (
-                  <div key={group.label}>
-                    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-brand-subtext/70">
-                      {group.label}
-                    </h3>
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      <AnimatePresence mode="popLayout">
-                        {group.items.map((apt, i) => (
-                          <AgendaCard
-                            key={apt.appointment_id}
-                            appointment={apt}
-                            isUpNext={upNext?.appointment_id === apt.appointment_id}
-                            onClick={() => openDetail(apt.appointment_id)}
-                            onJoinCall={() => router.push(`/doctor/call/${apt.appointment_id}`)}
-                            index={i}
-                          />
-                        ))}
-                      </AnimatePresence>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                // Flat grid for other tabs
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  <AnimatePresence mode="popLayout">
-                    {filtered.map((apt, i) => (
-                      <AgendaCard
-                        key={apt.appointment_id}
-                        appointment={apt}
-                        isUpNext={false}
-                        onClick={() => openDetail(apt.appointment_id)}
-                        onJoinCall={() => router.push(`/doctor/call/${apt.appointment_id}`)}
-                        index={i}
-                      />
+            {viewMode === "cards" ? (
+              <div className="space-y-6">
+                {isLoading ? (
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <AgendaCardSkeleton key={i} />
                     ))}
-                  </AnimatePresence>
-                </div>
-              )}
-            </div>
-          ) : (
-            <DataTable
-              columns={columns}
-              data={tabFiltered}
-              loading={isLoading}
-              className="rounded-[30px]"
-              emptyIcon={Calendar}
-              emptyTitle={`No ${activeTab} appointments`}
-              emptyDescription={getEmptyMessage(activeTab)}
-              storageKey="doctor-appointments-table"
-              searchPlaceholder="Search patient, mode, or schedule"
-              savedViews={[
-                { id: "all", label: "All" },
-                {
-                  id: "confirmed",
-                  label: "Confirmed",
-                  columnFilters: [{ id: "status", value: "confirmed" }] as ColumnFiltersState,
-                },
-                {
-                  id: "finalized",
-                  label: "Rx Finalized",
-                  columnFilters: [{ id: "prescription_status", value: "final" }] as ColumnFiltersState,
-                },
-              ]}
-              filterOptions={[
-                {
-                  id: "status",
-                  label: "Status",
-                  options: [
-                    { label: "Confirmed", value: "confirmed" },
-                    { label: "Completed", value: "completed" },
-                    { label: "Cancelled", value: "cancelled" },
-                    { label: "No show", value: "no_show" },
-                  ],
-                },
-                {
-                  id: "mode",
-                  label: "Mode",
-                  options: [
-                    { label: "Online", value: "online" },
-                    { label: "Walk-in", value: "walk_in" },
-                  ],
-                },
-                {
-                  id: "prescription_status",
-                  label: "Rx",
-                  options: [
-                    { label: "None", value: "none" },
-                    { label: "Draft", value: "draft" },
-                    { label: "Finalized", value: "final" },
-                  ],
-                },
-              ]}
-              density="comfortable"
-              rowSurface="card"
-              cellClassName={(row) =>
-                focusId === row.appointment_id ? "bg-brand/5 border-brand/20" : undefined
-              }
-            />
-          )}
+                  </div>
+                ) : filtered.length === 0 ? (
+                  <EmptyState tab={activeTab} />
+                ) : activeTab === "today" && todayGrouped.length > 0 ? (
+                  // Grouped agenda view for Today
+                  todayGrouped.map((group) => (
+                    <div key={group.label}>
+                      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-brand-subtext/70">
+                        {group.label}
+                      </h3>
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        <AnimatePresence mode="popLayout">
+                          {group.items.map((apt, i) => (
+                            <AgendaCard
+                              key={apt.appointment_id}
+                              appointment={apt}
+                              isUpNext={
+                                upNext?.appointment_id === apt.appointment_id
+                              }
+                              onClick={() => openDetail(apt.appointment_id)}
+                              onJoinCall={() =>
+                                router.push(
+                                  `/doctor/appointments/${apt.appointment_id}?step=consultation`,
+                                )
+                              }
+                              index={i}
+                            />
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  // Flat grid for other tabs
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <AnimatePresence mode="popLayout">
+                      {filtered.map((apt, i) => (
+                        <AgendaCard
+                          key={apt.appointment_id}
+                          appointment={apt}
+                          isUpNext={false}
+                          onClick={() => openDetail(apt.appointment_id)}
+                          onJoinCall={() =>
+                            router.push(
+                              `/doctor/appointments/${apt.appointment_id}?step=consultation`,
+                            )
+                          }
+                          index={i}
+                        />
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <DataTable
+                columns={columns}
+                data={tabFiltered}
+                loading={isLoading}
+                className="rounded-[30px]"
+                emptyIcon={Calendar}
+                emptyTitle={`No ${activeTab} appointments`}
+                emptyDescription={getEmptyMessage(activeTab)}
+                storageKey="doctor-appointments-table"
+                searchPlaceholder="Search patient, mode, or schedule"
+                savedViews={[
+                  { id: "all", label: "All" },
+                  {
+                    id: "confirmed",
+                    label: "Confirmed",
+                    columnFilters: [
+                      { id: "status", value: "confirmed" },
+                    ] as ColumnFiltersState,
+                  },
+                  {
+                    id: "finalized",
+                    label: "Rx Finalized",
+                    columnFilters: [
+                      { id: "prescription_status", value: "final" },
+                    ] as ColumnFiltersState,
+                  },
+                ]}
+                filterOptions={[
+                  {
+                    id: "status",
+                    label: "Status",
+                    options: [
+                      { label: "Confirmed", value: "confirmed" },
+                      { label: "Completed", value: "completed" },
+                      { label: "Cancelled", value: "cancelled" },
+                      { label: "No show", value: "no_show" },
+                    ],
+                  },
+                  {
+                    id: "mode",
+                    label: "Mode",
+                    options: [
+                      { label: "Online", value: "online" },
+                      { label: "Walk-in", value: "walk_in" },
+                    ],
+                  },
+                  {
+                    id: "prescription_status",
+                    label: "Rx",
+                    options: [
+                      { label: "None", value: "none" },
+                      { label: "Draft", value: "draft" },
+                      { label: "Finalized", value: "final" },
+                    ],
+                  },
+                ]}
+                density="comfortable"
+                rowSurface="card"
+                cellClassName={(row) =>
+                  focusId === row.appointment_id
+                    ? "bg-brand/5 border-brand/20"
+                    : undefined
+                }
+              />
+            )}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -965,7 +1061,12 @@ function StatCard({
       )}
     >
       <div className="flex items-center gap-3">
-        <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", c.icon)}>
+        <div
+          className={cn(
+            "flex h-10 w-10 items-center justify-center rounded-xl",
+            c.icon,
+          )}
+        >
           <Icon className="h-5 w-5" />
         </div>
         <div>
@@ -997,7 +1098,8 @@ function AgendaCard({
   const time = format(parseISO(apt.scheduled_at), "hh:mm a");
   const isWaiting =
     apt.video_enabled && apt.mode === "online" && apt.call_status === "waiting";
-  const canComplete = apt.status === "confirmed" && apt.prescription_status === "final";
+  const canComplete =
+    apt.status === "confirmed" && apt.prescription_status === "final";
 
   return (
     <motion.div
@@ -1018,9 +1120,7 @@ function AgendaCard({
       }}
       className={cn(
         "group relative cursor-pointer overflow-hidden rounded-2xl border bg-white transition-all duration-200 hover:shadow-[0_12px_40px_rgba(15,23,42,0.08)]",
-        isUpNext
-          ? "border-brand/30 ring-1 ring-brand/10"
-          : "border-border/60",
+        isUpNext ? "border-brand/30 ring-1 ring-brand/10" : "border-border/60",
       )}
     >
       {/* Color bar */}
@@ -1051,7 +1151,14 @@ function AgendaCard({
             )}
           </div>
           <StatusBadge
-            variant={apt.status as "confirmed" | "completed" | "cancelled" | "no_show" | "pending_payment"}
+            variant={
+              apt.status as
+                | "confirmed"
+                | "completed"
+                | "cancelled"
+                | "no_show"
+                | "pending_payment"
+            }
             size="xs"
             className="rounded-xl"
           />

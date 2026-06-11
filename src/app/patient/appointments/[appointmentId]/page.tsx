@@ -46,6 +46,7 @@ import { AuthGuard } from "@/components/auth-guard";
 import { PatientShell } from "@/components/patient/patient-shell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/loading";
+import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import {
   Dialog,
   DialogContent,
@@ -125,12 +126,18 @@ function AppointmentDetailContent() {
     path: "/patient/events/stream",
     onEvent: {
       appointment_completed: () => {
-        queryClient.invalidateQueries({ queryKey: ["patient", "appointment", appointmentId] });
-        queryClient.invalidateQueries({ queryKey: ["patient", "prescriptions"] });
+        queryClient.invalidateQueries({
+          queryKey: ["patient", "appointment", appointmentId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["patient", "prescriptions"],
+        });
       },
     },
     onReconnect: () => {
-      queryClient.invalidateQueries({ queryKey: ["patient", "appointment", appointmentId] });
+      queryClient.invalidateQueries({
+        queryKey: ["patient", "appointment", appointmentId],
+      });
     },
   });
 
@@ -148,9 +155,7 @@ function AppointmentDetailContent() {
         "/patient/appointments",
         { params: { limit: 100 } },
       );
-      return (
-        data.items.find((a) => a.appointment_id === appointmentId) || null
-      );
+      return data.items.find((a) => a.appointment_id === appointmentId) || null;
     },
   });
 
@@ -159,7 +164,9 @@ function AppointmentDetailContent() {
   const { data: doctorProfile } = useQuery({
     queryKey: ["public", "doctor", apt?.doctor_id],
     queryFn: async () => {
-      const { data } = await api.get<PublicDoctor>(`/public/doctors/${apt!.doctor_id}`);
+      const { data } = await api.get<PublicDoctor>(
+        `/public/doctors/${apt!.doctor_id}`,
+      );
       return data;
     },
     enabled: !!apt?.doctor_id,
@@ -352,7 +359,9 @@ function AppointmentDetailContent() {
                 <div className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-600">
                   <ClipboardList className="h-3 w-3" />
                 </div>
-                {apt.appointment_type === "follow_up" ? "Follow-up" : "New consultation"}
+                {apt.appointment_type === "follow_up"
+                  ? "Follow-up"
+                  : "New consultation"}
               </span>
             </div>
             <button
@@ -375,7 +384,9 @@ function AppointmentDetailContent() {
           >
             <div className="flex items-start gap-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/90 border border-white/50 shadow-sm text-brand-dark">
-                <Clock className={`h-4 w-4 ${refundInfo.spinning ? "animate-spin" : ""}`} />
+                <Clock
+                  className={`h-4 w-4 ${refundInfo.spinning ? "animate-spin" : ""}`}
+                />
               </div>
               <div className="flex-1">
                 <p className={`text-sm font-bold ${refundInfo.text}`}>
@@ -404,7 +415,9 @@ function AppointmentDetailContent() {
                 onClick={() => setActiveTab(t.key)}
                 className={cn(
                   "relative flex-1 rounded-xl px-3 py-2 text-xs sm:text-sm font-bold tracking-tight transition-colors z-10 cursor-pointer",
-                  isActive ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
+                  isActive
+                    ? "text-gray-900"
+                    : "text-gray-400 hover:text-gray-600",
                 )}
               >
                 {isActive && (
@@ -495,7 +508,8 @@ function AppointmentDetailContent() {
               </div>
 
               {/* Patient Notes — editable for upcoming, read-only for completed */}
-              {(apt.status === "confirmed" || apt.status === "pending_payment") && (
+              {(apt.status === "confirmed" ||
+                apt.status === "pending_payment") && (
                 <PatientNotes
                   appointmentId={apt.appointment_id}
                   initialNotes={apt.notes}
@@ -603,7 +617,8 @@ function AppointmentDetailContent() {
                       No documents yet
                     </p>
                     <p className="mt-1 max-w-xs text-xs text-gray-400">
-                      Prescriptions and receipts will appear here after your consultation is completed.
+                      Prescriptions and receipts will appear here after your
+                      consultation is completed.
                     </p>
                   </div>
                 )}
@@ -626,7 +641,10 @@ function AppointmentDetailContent() {
                 <h3 className="mb-4 text-sm font-bold tracking-tight text-gray-900 font-display">
                   Appointment Journey
                 </h3>
-                <AppointmentTimeline appointment={apt} className="!border-none !bg-transparent !p-0 !shadow-none" />
+                <AppointmentTimeline
+                  appointment={apt}
+                  className="!border-none !bg-transparent !p-0 !shadow-none"
+                />
               </div>
 
               {/* Rate & Review (after completion) */}
@@ -652,43 +670,16 @@ function AppointmentDetailContent() {
       </div>
 
       {/* Cancel Dialog */}
-      <Dialog
+      <ResponsiveDialog
         open={!!actions.cancellingId}
         onOpenChange={(open) => {
           if (!open) actions.closeCancel();
         }}
-      >
-        <DialogContent className="max-w-md rounded-[2rem] border border-white/50 bg-white/95 backdrop-blur-md shadow-2xl p-6">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 font-display text-lg font-bold">
-              <XCircle className="h-5 w-5 text-red-500" />
-              Cancel Appointment
-            </DialogTitle>
-            <DialogDescription className="text-xs text-gray-500">
-              This action cannot be undone.
-              {apt.payment_status === "paid" &&
-                ` A refund of ₹${apt.consultation_fee} will be processed automatically.`}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 mt-3">
-            <div className="rounded-xl border border-white/50 bg-gray-50/50 p-3.5 text-sm text-gray-950">
-              <p className="font-bold">{apt.doctor_name}</p>
-              <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5 font-medium">
-                <Calendar className="h-3.5 w-3.5 text-gray-400" />
-                {formatShortDate(apt.scheduled_at)}
-                <span className="text-gray-300">·</span>
-                <Clock className="h-3.5 w-3.5 text-gray-400" />
-                {formatTime(apt.scheduled_at)}
-              </p>
-            </div>
-            <Input
-              value={actions.cancelReason}
-              onChange={(e) => actions.setCancelReason(e.target.value)}
-              placeholder="Reason for cancellation (optional)"
-              className="rounded-xl border-gray-200 bg-white"
-            />
-          </div>
-          <DialogFooter className="mt-6 gap-2">
+        title="Cancel Appointment"
+        description={`This action cannot be undone.${apt.payment_status === "paid" ? ` A refund of ₹${apt.consultation_fee} will be processed automatically.` : ""}`}
+        maxClassName="max-w-md"
+        footer={
+          <>
             <Button
               variant="outline"
               onClick={actions.closeCancel}
@@ -706,51 +697,40 @@ function AppointmentDetailContent() {
               )}
               Confirm Cancellation
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-white/50 bg-gray-50/50 p-3.5 text-sm text-gray-955">
+            <p className="font-bold">{apt.doctor_name}</p>
+            <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5 font-medium">
+              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+              {formatShortDate(apt.scheduled_at)}
+              <span className="text-gray-300">·</span>
+              <Clock className="h-3.5 w-3.5 text-gray-400" />
+              {formatTime(apt.scheduled_at)}
+            </p>
+          </div>
+          <Input
+            value={actions.cancelReason}
+            onChange={(e) => actions.setCancelReason(e.target.value)}
+            placeholder="Reason for cancellation (optional)"
+            className="rounded-xl border-gray-200 bg-white"
+          />
+        </div>
+      </ResponsiveDialog>
 
       {/* Reschedule Dialog */}
-      <Dialog
+      <ResponsiveDialog
         open={!!actions.rescheduleId}
         onOpenChange={(open) => {
           if (!open) actions.closeReschedule();
         }}
-      >
-        <DialogContent className="max-w-2xl rounded-[2rem] border border-white/50 bg-white/95 backdrop-blur-md shadow-2xl p-0 overflow-hidden max-h-[90vh] flex flex-col">
-          <DialogHeader className="px-6 pt-6 pb-2">
-            <DialogTitle className="flex items-center gap-2 font-display text-lg font-bold">
-              <CalendarClock className="h-5 w-5 text-brand" />
-              Reschedule Appointment
-            </DialogTitle>
-            <DialogDescription className="text-xs text-gray-500">
-              Pick a new date and time slot.
-              {apt.payment_status === "paid" &&
-                " Your payment will be transferred automatically."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="px-6 flex-1 overflow-y-auto py-2">
-            <SlotPicker
-              doctorId={apt.doctor_id}
-              selectedDate={new Date()}
-              selectedSlot={actions.rescheduleSlot}
-              onDateChange={() => actions.setRescheduleSlot(null)}
-              onSlotChange={actions.setRescheduleSlot}
-              variant="week"
-              maxDate={maxBookingDate}
-              groupByTimeOfDay
-              showSuggestions
-            />
-            <Input
-              value={actions.rescheduleNote}
-              onChange={(e) => actions.setRescheduleNote(e.target.value)}
-              placeholder="Note for the clinic (optional)"
-              className="mt-4 rounded-xl border-gray-200 bg-white"
-            />
-          </div>
-
-          <DialogFooter className="px-6 py-4 bg-gray-50/50 border-t border-gray-100 flex gap-2 shrink-0">
+        title="Reschedule Appointment"
+        description={`Pick a new date and time slot.${apt.payment_status === "paid" ? " Your payment will be transferred automatically." : ""}`}
+        maxClassName="max-w-2xl"
+        footer={
+          <>
             <Button
               variant="outline"
               onClick={actions.closeReschedule}
@@ -760,8 +740,7 @@ function AppointmentDetailContent() {
             </Button>
             <Button
               disabled={
-                !actions.rescheduleSlot ||
-                actions.rescheduleMutation.isPending
+                !actions.rescheduleSlot || actions.rescheduleMutation.isPending
               }
               onClick={actions.confirmReschedule}
               className="gap-2 rounded-xl bg-brand text-white font-bold transition-all duration-200 active:scale-95 cursor-pointer h-10 px-4 shadow-sm"
@@ -772,9 +751,29 @@ function AppointmentDetailContent() {
               Confirm New Slot
               <ArrowRight className="h-4 w-4" />
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <SlotPicker
+            doctorId={apt.doctor_id}
+            selectedDate={new Date()}
+            selectedSlot={actions.rescheduleSlot}
+            onDateChange={() => actions.setRescheduleSlot(null)}
+            onSlotChange={actions.setRescheduleSlot}
+            variant="week"
+            maxDate={maxBookingDate}
+            groupByTimeOfDay
+            showSuggestions
+          />
+          <Input
+            value={actions.rescheduleNote}
+            onChange={(e) => actions.setRescheduleNote(e.target.value)}
+            placeholder="Note for the clinic (optional)"
+            className="mt-4 rounded-xl border-gray-200 bg-white"
+          />
+        </div>
+      </ResponsiveDialog>
     </PatientShell>
   );
 }

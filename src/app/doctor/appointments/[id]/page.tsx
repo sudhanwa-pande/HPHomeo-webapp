@@ -1,7 +1,13 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { format, parseISO } from "date-fns";
@@ -38,7 +44,10 @@ import type {
 import type { Receipt } from "@/types/receipt";
 
 // Context & Sections
-import { PrescriptionFormProvider, usePrescriptionForm } from "@/components/doctor/appointment-detail/PrescriptionFormContext";
+import {
+  PrescriptionFormProvider,
+  usePrescriptionForm,
+} from "@/components/doctor/appointment-detail/PrescriptionFormContext";
 import { OverviewSection } from "@/components/doctor/appointment-detail/OverviewSection";
 import { ConsultationSection } from "@/components/doctor/appointment-detail/ConsultationSection";
 import { PrescriptionSection } from "@/components/doctor/appointment-detail/PrescriptionSection";
@@ -46,7 +55,12 @@ import { CompleteSection } from "@/components/doctor/appointment-detail/Complete
 import { ReceiptSection } from "@/components/doctor/appointment-detail/ReceiptSection";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 
-type StepKey = "overview" | "consultation" | "prescription" | "complete" | "receipt";
+type StepKey =
+  | "overview"
+  | "consultation"
+  | "prescription"
+  | "complete"
+  | "receipt";
 
 interface StepConfig {
   key: StepKey;
@@ -97,7 +111,10 @@ function DetailPageWrapper() {
   }
 
   return (
-    <PrescriptionFormProvider appointmentId={appointmentId} appointment={appointment}>
+    <PrescriptionFormProvider
+      appointmentId={appointmentId}
+      appointment={appointment}
+    >
       <DetailContent appointment={appointment} appointmentId={appointmentId} />
     </PrescriptionFormProvider>
   );
@@ -111,17 +128,14 @@ function DetailContent({
   appointmentId: string;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const [activeStep, setActiveStep] = useState<StepKey>("overview");
+  const initialStep = (searchParams.get("step") as StepKey) || "overview";
+  const [activeStep, setActiveStep] = useState<StepKey>(initialStep);
   const [completionCelebration, setCompletionCelebration] = useState(false);
 
-  const {
-    isFinalized,
-    hasDraft,
-    hasUnsavedChanges,
-    autoSaveStatus,
-    isTyping,
-  } = usePrescriptionForm();
+  const { isFinalized, hasDraft, hasUnsavedChanges, autoSaveStatus, isTyping } =
+    usePrescriptionForm();
 
   // Dynamic header blur on typing
   const headerRef = useRef<HTMLDivElement>(null);
@@ -142,14 +156,14 @@ function DetailContent({
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
     const vv = window.visualViewport;
-    
+
     // Track max height to infer keyboard
     let maxHeight = vv.height;
-    
+
     const handleResize = () => {
       if (vv.height > maxHeight) maxHeight = vv.height;
       const keyboardHeight = Math.max(0, maxHeight - vv.height - 10);
-      
+
       const newSpacerHeight = keyboardHeight > 100 ? keyboardHeight : 0;
       if (Math.abs(newSpacerHeight - lastSpacerHeightRef.current) > 50) {
         lastSpacerHeightRef.current = newSpacerHeight;
@@ -184,11 +198,22 @@ function DetailContent({
     queryFn: async () => {
       const { data } = await api.get<{ appointments: DoctorAppointment[] }>(
         "/doctor/appointments/range",
-        { params: { from: "2026-03-01", to: format(new Date(), "yyyy-MM-dd"), patient_id: patientId, limit: 6 } },
+        {
+          params: {
+            from: "2026-03-01",
+            to: format(new Date(), "yyyy-MM-dd"),
+            patient_id: patientId,
+            limit: 6,
+          },
+        },
       );
       return data.appointments
         .filter((a) => a.appointment_id !== appointmentId)
-        .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
+        .sort(
+          (a, b) =>
+            new Date(b.scheduled_at).getTime() -
+            new Date(a.scheduled_at).getTime(),
+        )
         .slice(0, 5);
     },
     enabled: !!patientId,
@@ -208,14 +233,22 @@ function DetailContent({
   const stepState = useMemo(() => {
     const overview = "completed" as const;
     const consultation =
-      apt.status === "completed" || isFinalized ? "completed" : canStartConsultation ? "active" : "upcoming";
+      apt.status === "completed" || isFinalized
+        ? "completed"
+        : canStartConsultation
+          ? "active"
+          : "upcoming";
     const prescriptionState = isFinalized
       ? "completed"
       : ["confirmed", "completed"].includes(apt.status)
         ? "active"
         : "upcoming";
     const complete =
-      apt.status === "completed" ? "completed" : canComplete ? "active" : "upcoming";
+      apt.status === "completed"
+        ? "completed"
+        : canComplete
+          ? "active"
+          : "upcoming";
     const receipt = receiptData
       ? "completed"
       : apt.status === "completed"
@@ -243,7 +276,9 @@ function DetailContent({
         queryKey: ["doctor-appointment-detail", appointmentId],
       });
       queryClient.invalidateQueries({ queryKey: ["doctor-stats"] });
-      queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] === "doctor-appointments-range" });
+      queryClient.invalidateQueries({
+        predicate: (q) => q.queryKey[0] === "doctor-appointments-range",
+      });
     },
   });
 
@@ -316,7 +351,7 @@ function DetailContent({
 
       <div className="space-y-0">
         {/* ─── Back button + compact header ────────────────────── */}
-        <div 
+        <div
           ref={headerRef}
           style={{ top: "calc(var(--doctor-header-height, 64px) - 1px)" }}
           className="sticky z-30 -mx-4 border-b border-border/10 bg-white/80 px-4 py-3 backdrop-blur-lg sm:-mx-5 sm:px-5 sm:py-4 lg:-mx-6 lg:px-6 transition-all duration-200"
@@ -422,7 +457,9 @@ function DetailContent({
                   variant="brand"
                   className="w-full rounded-xl sm:w-auto"
                   onClick={() => {
-                    fetchAndOpenPdf(`/doctor/appointments/${appointmentId}/prescription/pdf/view`);
+                    fetchAndOpenPdf(
+                      `/doctor/appointments/${appointmentId}/prescription/pdf/view`,
+                    );
                   }}
                 >
                   <Eye className="h-4 w-4" />
@@ -437,7 +474,7 @@ function DetailContent({
         <div className="mt-4 flex flex-col gap-4 lg:flex-row sm:mt-6 sm:gap-6">
           {/* Vertical stepper sidebar */}
           <div className="hidden w-56 shrink-0 lg:block">
-            <nav 
+            <nav
               role="tablist"
               aria-label="Appointment steps"
               style={{ top: "calc(var(--doctor-header-height, 64px) + 24px)" }}
@@ -491,7 +528,7 @@ function DetailContent({
             <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-white to-transparent z-10 animate-fade-in" />
             <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent z-10 animate-fade-in" />
             <div className="w-full overflow-x-auto overscroll-x-contain scrollbar-hide snap-x snap-mandatory">
-              <div 
+              <div
                 role="tablist"
                 aria-label="Appointment steps mobile"
                 className="flex gap-0.5 rounded-2xl border border-border/60 bg-white p-1"
@@ -543,6 +580,10 @@ function DetailContent({
                 onMaximize={() => {
                   hapticTap();
                   setActiveStep("consultation");
+                }}
+                onMinimize={() => {
+                  hapticTap();
+                  setActiveStep("overview");
                 }}
               />
             )}
@@ -600,12 +641,16 @@ function DetailContent({
             </AnimatePresence>
 
             {/* Dynamic Keyboard & PiP Spacer */}
-            <div 
-              style={{ 
-                height: keyboardSpacerHeight > 0 
-                  ? keyboardSpacerHeight + (apt.mode === "online" && activeStep !== "consultation" ? 160 : 0) 
-                  : 0 
-              }} 
+            <div
+              style={{
+                height:
+                  keyboardSpacerHeight > 0
+                    ? keyboardSpacerHeight +
+                      (apt.mode === "online" && activeStep !== "consultation"
+                        ? 160
+                        : 0)
+                    : 0,
+              }}
               className="w-full transition-all duration-150"
             />
           </div>

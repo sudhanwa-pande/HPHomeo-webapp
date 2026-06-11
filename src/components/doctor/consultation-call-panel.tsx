@@ -13,7 +13,10 @@ import {
   VideoTrack,
   TrackToggle,
 } from "@livekit/components-react";
-import { isTrackReference, type TrackReference } from "@livekit/components-core";
+import {
+  isTrackReference,
+  type TrackReference,
+} from "@livekit/components-core";
 import { ConnectionState, Track } from "livekit-client";
 import {
   Camera,
@@ -41,11 +44,25 @@ import {
   LIVEKIT_AUDIO_CAPTURE_OPTIONS,
   LIVEKIT_ROOM_OPTIONS,
   prepareMediaChoices,
+  type CameraFacingMode,
 } from "@/lib/media";
-import { hapticPulse, hapticSuccess, hapticTap, hapticWarning } from "@/lib/haptics";
-import { notifyApiError, notifyError, notifyInfo, notifySuccess } from "@/lib/notify";
+import {
+  hapticPulse,
+  hapticSuccess,
+  hapticTap,
+  hapticWarning,
+} from "@/lib/haptics";
+import {
+  notifyApiError,
+  notifyError,
+  notifyInfo,
+  notifySuccess,
+} from "@/lib/notify";
 import { playIncomingMessageSound } from "@/lib/sound";
 import { cn } from "@/lib/utils";
+import { LiveCallRoom } from "@/components/call/live-call-room";
+import { DoctorConsultationWorkspace } from "./consultation-workspace";
+import { useQueryState, parseAsStringLiteral } from "nuqs";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { ConnectionObserver } from "@/components/call/connection-observer";
 import { Button } from "@/components/ui/button";
@@ -59,7 +76,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { DoctorAppointmentDetail, VideoTokenResponse } from "@/types/doctor";
+import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
+import type {
+  DoctorAppointmentDetail,
+  VideoTokenResponse,
+} from "@/types/doctor";
 
 type MediaPreferences = {
   audio: boolean;
@@ -67,10 +88,15 @@ type MediaPreferences = {
 };
 
 function getPublishedTrack(track: unknown): TrackReference | undefined {
-  return isTrackReference(track) && track.publication?.track ? track : undefined;
+  return isTrackReference(track) && track.publication?.track
+    ? track
+    : undefined;
 }
 
-function formatConnectionLabel(connectionState: ConnectionState, remoteCount: number) {
+function formatConnectionLabel(
+  connectionState: ConnectionState,
+  remoteCount: number,
+) {
   if (connectionState === ConnectionState.Connected) {
     return remoteCount > 0 ? "Live" : "Waiting";
   }
@@ -93,11 +119,13 @@ export function ConsultationCallPanel({
   appointment,
   minimized = false,
   onMaximize,
+  onMinimize,
 }: {
   appointmentId: string;
   appointment: DoctorAppointmentDetail;
   minimized?: boolean;
   onMaximize?: () => void;
+  onMinimize?: () => void;
 }) {
   const queryClient = useQueryClient();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -111,6 +139,15 @@ export function ConsultationCallPanel({
     audio: true,
     video: true,
   });
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useQueryState(
+    "tab",
+    parseAsStringLiteral(["notes", "info", "chat"] as const).withDefault(
+      "notes",
+    ),
+  );
+  const [preferredFacingMode, setPreferredFacingMode] =
+    useState<CameraFacingMode>("user");
 
   // Safety net: stop all camera/mic tracks when this panel unmounts
   useEffect(() => {
@@ -134,7 +171,7 @@ export function ConsultationCallPanel({
   const [isDragging, setIsDragging] = useState(false);
   const [isPeeking, setIsPeeking] = useState(false);
   const [bounds, setBounds] = useState<Bounds | null>(null);
-  
+
   const peekTimerRef = useRef<NodeJS.Timeout | null>(null);
   const peekStartedAtRef = useRef<number>(0);
   const lastUserYRef = useRef<number | null>(null);
@@ -143,7 +180,8 @@ export function ConsultationCallPanel({
   const maxVvHeightRef = useRef<number>(0);
 
   const calculateBounds = useCallback((width: number) => {
-    if (typeof window === "undefined") return { top: 0, left: 0, right: 0, bottom: 0 };
+    if (typeof window === "undefined")
+      return { top: 0, left: 0, right: 0, bottom: 0 };
     const vv = window.visualViewport;
     const vW = vv?.width || window.innerWidth;
     const vH = vv?.height || window.innerHeight;
@@ -153,7 +191,7 @@ export function ConsultationCallPanel({
       top: Math.max(oT + 16, window.innerHeight > window.innerWidth ? 48 : 16),
       left: oL + 16,
       right: oL + vW - width - 16,
-      bottom: oT + vH - (width * (4 / 3)) - 16, 
+      bottom: oT + vH - width * (4 / 3) - 16,
     };
   }, []);
 
@@ -216,17 +254,17 @@ export function ConsultationCallPanel({
       setBounds(calculateBounds(180));
       lastUserYRef.current = null; // Clears manual drag memory so it safely snaps
       interactionState.current = "idle";
-      
+
       // Reset max to prevent drift
       if (window.visualViewport) {
-        maxVvHeightRef.current = window.visualViewport.height || window.innerHeight;
+        maxVvHeightRef.current =
+          window.visualViewport.height || window.innerHeight;
       }
     };
     window.addEventListener("orientationchange", onOrientationChange);
-    return () => window.removeEventListener("orientationchange", onOrientationChange);
+    return () =>
+      window.removeEventListener("orientationchange", onOrientationChange);
   }, [calculateBounds]);
-
-
 
   // Keyboard detection (hybrid with debounce) & Atomic bounds recalculation
   useEffect(() => {
@@ -250,12 +288,12 @@ export function ConsultationCallPanel({
         // Hybrid check: maxVvHeight minus visual viewport safely detects keyboard on iOS Safari
         const keyboardOpen = maxVvHeightRef.current - vv.height > 150;
         const willBePeeking = keyboardOpen ? isPeeking : false;
-        
+
         setIsKeyboardOpen(keyboardOpen);
         if (!keyboardOpen) setIsPeeking(false);
-        
+
         // 1. Update bounds FIRST (atomically batched with state updates)
-        // 2. Framer motion applies dragConstraints 
+        // 2. Framer motion applies dragConstraints
         // 3. Animation begins to new x/y safely without jumps
         const nextPipWidth = willBePeeking ? 200 : keyboardOpen ? 160 : 180;
         setBounds(calculateBounds(nextPipWidth));
@@ -299,12 +337,17 @@ export function ConsultationCallPanel({
     setJoining(true);
     setJoinError(null);
     try {
-      const prepared = await prepareMediaChoices({ audio: wantsAudio, video: wantsVideo, preferredFacingMode: "user" });
+      const prepared = await prepareMediaChoices({
+        audio: wantsAudio,
+        video: wantsVideo,
+        preferredFacingMode: "user",
+      });
       setMediaPreferences({ audio: prepared.audio, video: prepared.video });
-      if (prepared.warning) notifyInfo("Joining with available devices", prepared.warning);
+      if (prepared.warning)
+        notifyInfo("Joining with available devices", prepared.warning);
       const { data } = await api.post<VideoTokenResponse>(
         `/doctor/appointments/${appointmentId}/video-token`,
-        { session_id: callSession.getSessionId() }
+        { session_id: callSession.getSessionId() },
       );
       if (data.epoch !== undefined) {
         callSession.updateEpoch(data.epoch);
@@ -322,7 +365,12 @@ export function ConsultationCallPanel({
       setJoinError(message);
       if (
         error instanceof Error &&
-        ["NotAllowedError", "NotFoundError", "NotReadableError", "AbortError"].includes(error.name)
+        [
+          "NotAllowedError",
+          "NotFoundError",
+          "NotReadableError",
+          "AbortError",
+        ].includes(error.name)
       ) {
         notifyError("Couldn't start media", message);
       } else {
@@ -347,7 +395,9 @@ export function ConsultationCallPanel({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] }),
         queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] }),
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail", appointmentId] }),
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointment-detail", appointmentId],
+        }),
       ]);
     },
     onError: (error) => notifyApiError(error, "Couldn't end call"),
@@ -371,10 +421,16 @@ export function ConsultationCallPanel({
   if (!canStartConsultation) {
     if (minimized) return null;
     return (
-      <section ref={panelRef} className="rounded-2xl border border-gray-200/60 bg-white p-5">
-        <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
+      <section
+        ref={panelRef}
+        className="rounded-2xl border border-gray-200/60 bg-white p-5"
+      >
+        <p className="text-sm font-semibold text-gray-900">
+          Consultation workspace
+        </p>
         <p className="mt-1.5 text-sm leading-relaxed text-gray-500">
-          Video consultation is available only for confirmed online appointments.
+          Video consultation is available only for confirmed online
+          appointments.
         </p>
       </section>
     );
@@ -385,7 +441,10 @@ export function ConsultationCallPanel({
   if (minimized && !tokenData) {
     if (callEnded) return null;
     return (
-      <div ref={panelRef} className="fixed bottom-24 right-4 z-[999] sm:bottom-6 sm:right-6">
+      <div
+        ref={panelRef}
+        className="fixed bottom-24 right-4 z-[999] sm:bottom-6 sm:right-6"
+      >
         <button
           type="button"
           onClick={() => {
@@ -429,145 +488,239 @@ export function ConsultationCallPanel({
         >
           <ConnectionObserver />
           {!minimized ? (
-            <div className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white transition-all duration-300">
-            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
-                <p className="mt-0.5 text-[11px] text-gray-400">Video and chat in one place</p>
+            isFullScreen ? (
+              <div className="fixed inset-0 z-[100] bg-app-bg">
+                <LiveCallRoom
+                  title={appointment.patient?.full_name ?? "Video consultation"}
+                  subtitle={format(
+                    parseISO(appointment.scheduled_at),
+                    "EEE, dd MMM yyyy - hh:mm a",
+                  )}
+                  remoteLabel={appointment.patient?.full_name ?? "Patient"}
+                  remoteWaitingTitle={
+                    appointment.patient?.full_name
+                      ? `Waiting for ${appointment.patient.full_name}`
+                      : "Waiting for patient"
+                  }
+                  remoteWaitingDescription="The patient will appear here when they join the consultation room."
+                  onLeave={() => endCallMutation.mutate()}
+                  onBack={() => {
+                    setIsFullScreen(false);
+                    if (onMinimize) onMinimize();
+                  }}
+                  endLabel="Leave consultation"
+                  endLoading={endCallMutation.isPending}
+                  allowScreenShare
+                  allowCameraSwitch
+                  preferredFacingMode={preferredFacingMode}
+                  onFacingModeChange={setPreferredFacingMode}
+                  showWorkspaceLayout={true}
+                  workspaceActiveTab={activeWorkspaceTab}
+                  onWorkspaceTabChange={setActiveWorkspaceTab}
+                  isFullScreenLayout={true}
+                  onToggleFullScreen={() => {
+                    setIsFullScreen(false);
+                    if (onMinimize) onMinimize();
+                  }}
+                  workspaceContent={
+                    <DoctorConsultationWorkspace
+                      appointmentId={appointmentId}
+                      appointment={appointment}
+                      activeTab={activeWorkspaceTab}
+                      onTabChange={setActiveWorkspaceTab}
+                    />
+                  }
+                />
               </div>
-              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
-                In call
-              </span>
-            </div>
-            <CallRoomContent
-              minimized={false}
-              patientName={appointment.patient.full_name}
-              endLabel="End consultation"
-              endLoading={endCallMutation.isPending}
-              onEnd={() => endCallMutation.mutate()}
-              onMaximize={onMaximize}
-              onReconnect={() => void joinCall()}
-              joining={joining}
-            />
-          </div>
-        ) : (
-          <motion.div
-            role="dialog"
-            aria-label="Video call window"
-            drag
-            dragControls={dragControls}
-            dragListener={false}
-            dragMomentum={false}
-            dragElastic={0.05}
-            dragConstraints={bounds || undefined}
-            onDragStart={() => {
-              if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-              setIsPeeking(false);
-              interactionState.current = "dragging";
-              setIsDragging(true);
-            }}
-            onDragEnd={(e, info) => {
-              interactionState.current = "idle";
-              setIsDragging(false);
-              lastUserYRef.current = info.point.y;
-              wasInBottomHalfRef.current = info.point.y > (typeof window !== 'undefined' ? window.innerHeight / 2 : 500);
-            }}
-            onClick={() => {
-              if (isDragging) return;
-              if (interactionState.current === "idle" || interactionState.current === "peeking") {
-                 handlePeek();
-              }
-            }}
-            initial={false}
-            animate={{
-              width: pipWidth,
-              opacity: isKeyboardOpen && !isPeeking ? 0.85 : 1,
-              x: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
-                   ? (bounds?.right ?? undefined)
-                   : undefined,
-              y: isKeyboardOpen && (lastUserYRef.current === null || wasInBottomHalfRef.current) 
-                   ? (bounds?.top ?? undefined)
-                   : undefined,
-              scale: isDragging ? 1.02 : 1,
-            }}
-            transition={{
-              type: "spring",
-              stiffness: 300,
-              damping: 30,
-            }}
-            className={cn(
-              "fixed z-[1000] overflow-hidden rounded-2xl border touch-manipulation",
-              isDragging
-                ? "cursor-grabbing border-brand/40 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)] bg-[#111113]/90 backdrop-blur-md"
-                : "border-white/10",
-              !isDragging && (isKeyboardOpen && !isPeeking 
-                 ? "bg-[#111113]/95 backdrop-blur-none shadow-lg"
-                 : "bg-[#111113]/90 backdrop-blur-md shadow-2xl")
-            )}
-            style={{
-              top: 0,
-              left: 0,
-              x: bounds?.right ?? (typeof window !== 'undefined' ? window.innerWidth - pipWidth - 16 : 0),
-              y: bounds?.top ?? (typeof window !== 'undefined' && window.innerHeight > window.innerWidth ? 48 : 16),
-            }}
-          >
-            <div
-              role="slider"
-              aria-label="Drag to reposition video"
-              aria-valuenow={0}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                dragControls.start(e);
+            ) : (
+              <div className="overflow-hidden rounded-2xl border border-gray-200/60 bg-app-bg shadow-sm transition-all duration-300 h-[700px] flex flex-col">
+                <LiveCallRoom
+                  title={appointment.patient?.full_name ?? "Video consultation"}
+                  subtitle={format(
+                    parseISO(appointment.scheduled_at),
+                    "EEE, dd MMM yyyy - hh:mm a",
+                  )}
+                  remoteLabel={appointment.patient?.full_name ?? "Patient"}
+                  remoteWaitingTitle={
+                    appointment.patient?.full_name
+                      ? `Waiting for ${appointment.patient.full_name}`
+                      : "Waiting for patient"
+                  }
+                  remoteWaitingDescription="The patient will appear here when they join the consultation room."
+                  onLeave={() => endCallMutation.mutate()}
+                  endLabel="End call"
+                  endLoading={endCallMutation.isPending}
+                  allowScreenShare
+                  allowCameraSwitch
+                  preferredFacingMode={preferredFacingMode}
+                  onFacingModeChange={setPreferredFacingMode}
+                  showWorkspaceLayout={true}
+                  workspaceActiveTab={activeWorkspaceTab}
+                  onWorkspaceTabChange={setActiveWorkspaceTab}
+                  className="flex-1 h-full"
+                  isFullScreenLayout={false}
+                  onToggleFullScreen={() => setIsFullScreen(true)}
+                  workspaceContent={
+                    <DoctorConsultationWorkspace
+                      appointmentId={appointmentId}
+                      appointment={appointment}
+                      activeTab={activeWorkspaceTab}
+                      onTabChange={setActiveWorkspaceTab}
+                    />
+                  }
+                />
+              </div>
+            )
+          ) : (
+            <motion.div
+              role="dialog"
+              aria-label="Video call window"
+              drag
+              dragControls={dragControls}
+              dragListener={false}
+              dragMomentum={false}
+              dragElastic={0.05}
+              dragConstraints={bounds || undefined}
+              onDragStart={() => {
+                if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+                setIsPeeking(false);
+                interactionState.current = "dragging";
+                setIsDragging(true);
+              }}
+              onDragEnd={(e, info) => {
+                interactionState.current = "idle";
+                setIsDragging(false);
+                lastUserYRef.current = info.point.y;
+                wasInBottomHalfRef.current =
+                  info.point.y >
+                  (typeof window !== "undefined"
+                    ? window.innerHeight / 2
+                    : 500);
+              }}
+              onClick={() => {
+                if (isDragging) return;
+                if (
+                  interactionState.current === "idle" ||
+                  interactionState.current === "peeking"
+                ) {
+                  handlePeek();
+                }
+              }}
+              initial={false}
+              animate={{
+                width: pipWidth,
+                opacity: isKeyboardOpen && !isPeeking ? 0.85 : 1,
+                x:
+                  isKeyboardOpen &&
+                  (lastUserYRef.current === null || wasInBottomHalfRef.current)
+                    ? (bounds?.right ?? undefined)
+                    : undefined,
+                y:
+                  isKeyboardOpen &&
+                  (lastUserYRef.current === null || wasInBottomHalfRef.current)
+                    ? (bounds?.top ?? undefined)
+                    : undefined,
+                scale: isDragging ? 1.02 : 1,
+              }}
+              transition={{
+                type: "spring",
+                stiffness: 300,
+                damping: 30,
               }}
               className={cn(
-                "absolute inset-x-0 top-0 z-10 flex h-10 touch-none select-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
-                isDragging || isKeyboardOpen ? "opacity-100" : "opacity-0 hover:opacity-100",
-                isDragging ? "cursor-grabbing" : "cursor-grab",
+                "fixed z-[1000] overflow-hidden rounded-2xl border touch-manipulation",
+                isDragging
+                  ? "cursor-grabbing border-brand/40 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)] bg-[#111113]/90 backdrop-blur-md"
+                  : "border-white/10",
+                !isDragging &&
+                  (isKeyboardOpen && !isPeeking
+                    ? "bg-[#111113]/95 backdrop-blur-none shadow-lg"
+                    : "bg-[#111113]/90 backdrop-blur-md shadow-2xl"),
               )}
+              style={{
+                top: 0,
+                left: 0,
+                x:
+                  bounds?.right ??
+                  (typeof window !== "undefined"
+                    ? window.innerWidth - pipWidth - 16
+                    : 0),
+                y:
+                  bounds?.top ??
+                  (typeof window !== "undefined" &&
+                  window.innerHeight > window.innerWidth
+                    ? 48
+                    : 16),
+              }}
             >
-              <GripHorizontal className="h-4 w-4 shrink-0 text-white/60 drop-shadow-md" />
-              <button
-                onClick={(e) => {
+              <div
+                role="slider"
+                aria-label="Drag to reposition video"
+                aria-valuenow={0}
+                onPointerDown={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
-                  hapticTap();
-                  if (onMaximize) onMaximize();
+                  dragControls.start(e);
                 }}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30"
+                className={cn(
+                  "absolute inset-x-0 top-0 z-10 flex h-10 touch-none select-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
+                  isDragging || isKeyboardOpen
+                    ? "opacity-100"
+                    : "opacity-0 hover:opacity-100",
+                  isDragging ? "cursor-grabbing" : "cursor-grab",
+                )}
               >
-                <Maximize2 className="h-4 w-4" />
-              </button>
-            </div>
+                <GripHorizontal className="h-4 w-4 shrink-0 text-white/60 drop-shadow-md" />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    hapticTap();
+                    if (onMaximize) onMaximize();
+                  }}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30"
+                >
+                  <Maximize2 className="h-4 w-4" />
+                </button>
+              </div>
 
-            <CallRoomContent
-              minimized={true}
-              patientName={appointment.patient.full_name}
-              endLabel="End consultation"
-              endLoading={endCallMutation.isPending}
-              onEnd={() => endCallMutation.mutate()}
-              onMaximize={onMaximize}
-              onReconnect={() => void joinCall()}
-              joining={joining}
-            />
-          </motion.div>
-        )}
-      </LiveKitRoom>
+              <CallRoomContent
+                minimized={true}
+                patientName={appointment.patient.full_name}
+                endLabel="End consultation"
+                endLoading={endCallMutation.isPending}
+                onEnd={() => endCallMutation.mutate()}
+                onMaximize={onMaximize}
+                onReconnect={() => void joinCall()}
+                joining={joining}
+              />
+            </motion.div>
+          )}
+        </LiveKitRoom>
       </div>
     );
   }
 
   // Pre-join UI — full-size only (minimized + no tokenData returns null above)
   return (
-    <section ref={panelRef} className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white">
+    <section
+      ref={panelRef}
+      className="overflow-hidden rounded-2xl border border-gray-200/60 bg-white"
+    >
       <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
         <div>
-          <p className="text-sm font-semibold text-gray-900">Consultation workspace</p>
-          <p className="mt-0.5 text-[11px] text-gray-400">Video and chat in one place</p>
+          <p className="text-sm font-semibold text-gray-900">
+            Consultation workspace
+          </p>
+          <p className="mt-0.5 text-[11px] text-gray-400">
+            Video and chat in one place
+          </p>
         </div>
         <span
           className={cn(
             "rounded-full px-2.5 py-1 text-[10px] font-semibold",
-            callEnded ? "bg-gray-100 text-gray-500" : "bg-brand/[0.06] text-brand",
+            callEnded
+              ? "bg-gray-100 text-gray-500"
+              : "bg-brand/[0.06] text-brand",
           )}
         >
           {callEnded ? "Ended" : "Ready"}
@@ -579,7 +732,10 @@ export function ConsultationCallPanel({
           <div>
             <p className="text-lg font-bold">{appointment.patient.full_name}</p>
             <p className="mt-1 text-xs text-white/50">
-              {format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy - hh:mm a")}
+              {format(
+                parseISO(appointment.scheduled_at),
+                "EEE, dd MMM yyyy - hh:mm a",
+              )}
             </p>
           </div>
           <div className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white/80 backdrop-blur-md shadow-sm">
@@ -594,7 +750,9 @@ export function ConsultationCallPanel({
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <button
             type="button"
-            onClick={() => setMediaPreferences((c) => ({ ...c, video: !c.video }))}
+            onClick={() =>
+              setMediaPreferences((c) => ({ ...c, video: !c.video }))
+            }
             className={cn(
               "flex flex-1 items-center gap-3 rounded-[1.2rem] border px-4 py-3.5 transition-all duration-200",
               mediaPreferences.video
@@ -605,7 +763,9 @@ export function ConsultationCallPanel({
             <div
               className={cn(
                 "flex h-10 w-10 items-center justify-center rounded-full transition-colors",
-                mediaPreferences.video ? "bg-brand text-white" : "bg-white/10 text-white/50",
+                mediaPreferences.video
+                  ? "bg-brand text-white"
+                  : "bg-white/10 text-white/50",
               )}
             >
               {mediaPreferences.video ? (
@@ -615,7 +775,9 @@ export function ConsultationCallPanel({
               )}
             </div>
             <div className="flex-1 text-left">
-              <span className="block text-sm font-semibold text-white">Camera</span>
+              <span className="block text-sm font-semibold text-white">
+                Camera
+              </span>
               <span className="block text-[11px] font-medium text-white/50">
                 {mediaPreferences.video ? "Enabled" : "Disabled"}
               </span>
@@ -623,7 +785,9 @@ export function ConsultationCallPanel({
           </button>
           <button
             type="button"
-            onClick={() => setMediaPreferences((c) => ({ ...c, audio: !c.audio }))}
+            onClick={() =>
+              setMediaPreferences((c) => ({ ...c, audio: !c.audio }))
+            }
             className={cn(
               "flex flex-1 items-center gap-3 rounded-[1.2rem] border px-4 py-3.5 transition-all duration-200",
               mediaPreferences.audio
@@ -634,7 +798,9 @@ export function ConsultationCallPanel({
             <div
               className={cn(
                 "flex h-10 w-10 items-center justify-center rounded-full transition-colors",
-                mediaPreferences.audio ? "bg-brand text-white" : "bg-white/10 text-white/50",
+                mediaPreferences.audio
+                  ? "bg-brand text-white"
+                  : "bg-white/10 text-white/50",
               )}
             >
               {mediaPreferences.audio ? (
@@ -644,7 +810,9 @@ export function ConsultationCallPanel({
               )}
             </div>
             <div className="flex-1 text-left">
-              <span className="block text-sm font-semibold text-white">Microphone</span>
+              <span className="block text-sm font-semibold text-white">
+                Microphone
+              </span>
               <span className="block text-[11px] font-medium text-white/50">
                 {mediaPreferences.audio ? "Enabled" : "Disabled"}
               </span>
@@ -729,10 +897,16 @@ function CallRoomContent({
   );
   const tracks = useTracks(trackSources, { onlySubscribed: false });
   const localVideoTrack = getPublishedTrack(
-    tracks.find((track) => track.participant.isLocal && track.source === Track.Source.Camera),
+    tracks.find(
+      (track) =>
+        track.participant.isLocal && track.source === Track.Source.Camera,
+    ),
   );
   const remoteVideoTrack = getPublishedTrack(
-    tracks.find((track) => !track.participant.isLocal && track.source === Track.Source.Camera),
+    tracks.find(
+      (track) =>
+        !track.participant.isLocal && track.source === Track.Source.Camera,
+    ),
   );
   const connectionLabel = useMemo(
     () => formatConnectionLabel(connectionState, remoteParticipants.length),
@@ -742,11 +916,19 @@ function CallRoomContent({
   const hasRemote = remoteParticipants.length > 0;
 
   useEffect(() => {
-    if (lastCameraError) notifyError("Camera unavailable", getMediaDeviceErrorMessage(lastCameraError));
+    if (lastCameraError)
+      notifyError(
+        "Camera unavailable",
+        getMediaDeviceErrorMessage(lastCameraError),
+      );
   }, [lastCameraError]);
 
   useEffect(() => {
-    if (lastMicrophoneError) notifyError("Microphone unavailable", getMediaDeviceErrorMessage(lastMicrophoneError));
+    if (lastMicrophoneError)
+      notifyError(
+        "Microphone unavailable",
+        getMediaDeviceErrorMessage(lastMicrophoneError),
+      );
   }, [lastMicrophoneError]);
 
   useEffect(() => {
@@ -773,7 +955,10 @@ function CallRoomContent({
         !isMicrophoneEnabled ? LIVEKIT_AUDIO_CAPTURE_OPTIONS : undefined,
       );
     } catch (error) {
-      notifyError("Microphone update failed", getMediaDeviceErrorMessage(error));
+      notifyError(
+        "Microphone update failed",
+        getMediaDeviceErrorMessage(error),
+      );
     }
   };
 
@@ -793,12 +978,22 @@ function CallRoomContent({
           className="relative aspect-video cursor-pointer bg-[#111113]"
           role="button"
           tabIndex={0}
-          onClick={() => { if (onMaximize) onMaximize(); }}
-          onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && onMaximize) { e.preventDefault(); onMaximize(); } }}
+          onClick={() => {
+            if (onMaximize) onMaximize();
+          }}
+          onKeyDown={(e) => {
+            if ((e.key === "Enter" || e.key === " ") && onMaximize) {
+              e.preventDefault();
+              onMaximize();
+            }
+          }}
           title="Tap to expand"
         >
           {remoteVideoTrack ? (
-            <VideoTrack trackRef={remoteVideoTrack} className="h-full w-full object-contain" />
+            <VideoTrack
+              trackRef={remoteVideoTrack}
+              className="h-full w-full object-contain"
+            />
           ) : (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
@@ -806,7 +1001,9 @@ function CallRoomContent({
                   <User className="h-4.5 w-4.5 text-white/25" />
                 </div>
                 <p className="text-[11px] text-white/35">{patientName}</p>
-                <p className="mt-0.5 text-[10px] text-white/20">Waiting for video</p>
+                <p className="mt-0.5 text-[10px] text-white/20">
+                  Waiting for video
+                </p>
               </div>
             </div>
           )}
@@ -842,7 +1039,11 @@ function CallRoomContent({
                 disabled={joining}
                 className="flex h-8 items-center gap-1.5 rounded-full bg-brand px-3 text-[11px] font-semibold text-white transition-colors hover:bg-brand/90 disabled:opacity-60"
               >
-                {joining ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <RefreshCw className="h-3 w-3" />}
+                {joining ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                ) : (
+                  <RefreshCw className="h-3 w-3" />
+                )}
                 Reconnect
               </button>
             ) : (
@@ -852,7 +1053,9 @@ function CallRoomContent({
                   e.stopPropagation(); // prevent any parent drag handlers
                   void toggleMic();
                 }}
-                title={isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"}
+                title={
+                  isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"
+                }
                 className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
                   isMicrophoneEnabled
@@ -901,15 +1104,14 @@ function CallRoomContent({
         </div>
 
         {/* End call confirmation dialog (minimized) */}
-        <Dialog open={endConfirmOpen} onOpenChange={setEndConfirmOpen}>
-          <DialogContent className="max-w-xs rounded-2xl p-6">
-            <DialogHeader>
-              <DialogTitle className="text-base font-bold text-center">End this call?</DialogTitle>
-              <DialogDescription className="text-xs text-center">
-                This will close the call session for this patient.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="flex flex-row gap-2 mt-4 sm:justify-center">
+        <ResponsiveDialog
+          open={endConfirmOpen}
+          onOpenChange={setEndConfirmOpen}
+          title="End this call?"
+          description="This will close the call session for this patient."
+          size="sm"
+          footer={
+            <div className="flex flex-row gap-2 w-full">
               <Button
                 variant="outline"
                 className="flex-1 rounded-xl h-10 text-xs text-brand-dark"
@@ -929,9 +1131,14 @@ function CallRoomContent({
               >
                 End call
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </div>
+          }
+        >
+          {/* Empty children container for action modal */}
+          <div className="py-2 text-center text-xs text-brand-subtext">
+            Are you sure you want to end this consultation call?
+          </div>
+        </ResponsiveDialog>
 
         <RoomAudioRenderer />
       </div>
@@ -945,25 +1152,37 @@ function CallRoomContent({
       <div className="relative bg-[#111113]">
         <div className="relative h-[220px] sm:h-[400px] xl:h-[520px]">
           {remoteVideoTrack ? (
-            <VideoTrack trackRef={remoteVideoTrack} className="h-full w-full object-contain" />
+            <VideoTrack
+              trackRef={remoteVideoTrack}
+              className="h-full w-full object-contain"
+            />
           ) : (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
                 <div className="relative mx-auto h-20 w-20">
                   <span
                     className="absolute inset-0 rounded-full border border-white/[0.04]"
-                    style={{ animation: "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite" }}
+                    style={{
+                      animation: "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite",
+                    }}
                   />
                   <span
                     className="absolute inset-2 rounded-full border border-white/[0.06]"
-                    style={{ animation: "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite 1.3s" }}
+                    style={{
+                      animation:
+                        "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite 1.3s",
+                    }}
                   />
                   <div className="absolute inset-4 flex items-center justify-center rounded-full bg-white/[0.06]">
                     <User className="h-6 w-6 text-white/25" />
                   </div>
                 </div>
-                <p className="mt-4 text-sm font-medium text-white/70">{patientName}</p>
-                <p className="mt-1 text-xs text-white/30">Waiting for patient video</p>
+                <p className="mt-4 text-sm font-medium text-white/70">
+                  {patientName}
+                </p>
+                <p className="mt-1 text-xs text-white/30">
+                  Waiting for patient video
+                </p>
               </div>
             </div>
           )}
@@ -1004,7 +1223,9 @@ function CallRoomContent({
               <div
                 className={cn(
                   "flex h-6 w-6 items-center justify-center rounded-full shadow-sm",
-                  isMicrophoneEnabled ? "bg-black/60 backdrop-blur-md" : "bg-red-500",
+                  isMicrophoneEnabled
+                    ? "bg-black/60 backdrop-blur-md"
+                    : "bg-red-500",
                 )}
               >
                 {isMicrophoneEnabled ? (
@@ -1028,7 +1249,11 @@ function CallRoomContent({
                     : "bg-red-500 text-white shadow-[0_4px_16px_rgba(239,68,68,0.4)]",
                 )}
               >
-                {isMicrophoneEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+                {isMicrophoneEnabled ? (
+                  <Mic className="h-5 w-5" />
+                ) : (
+                  <MicOff className="h-5 w-5" />
+                )}
               </TrackToggle>
               <TrackToggle
                 source={Track.Source.Camera}
@@ -1091,8 +1316,12 @@ function CallRoomContent({
           {endConfirmOpen && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm">
               <div className="rounded-[2rem] border border-white/10 bg-[#1a1a1d] px-8 py-6 text-center shadow-2xl">
-                <p className="text-lg font-bold text-white">End this consultation?</p>
-                <p className="mt-2 text-sm text-white/60">This action cannot be undone.</p>
+                <p className="text-lg font-bold text-white">
+                  End this consultation?
+                </p>
+                <p className="mt-2 text-sm text-white/60">
+                  This action cannot be undone.
+                </p>
                 <div className="mt-6 flex gap-3">
                   <button
                     type="button"
@@ -1125,7 +1354,9 @@ function CallRoomContent({
         <div className="border-t border-gray-100">
           <div className="flex items-center justify-between px-4 py-3">
             <p className="text-sm font-semibold text-gray-900">In-call chat</p>
-            <p className="text-[11px] text-gray-400">Messages stay in this session</p>
+            <p className="text-[11px] text-gray-400">
+              Messages stay in this session
+            </p>
           </div>
 
           <ScrollArea className="h-48 px-4">
@@ -1141,12 +1372,17 @@ function CallRoomContent({
                 return (
                   <div
                     key={`${chatMessage.timestamp}-${index}`}
-                    className={cn("flex", isLocal ? "justify-end" : "justify-start")}
+                    className={cn(
+                      "flex",
+                      isLocal ? "justify-end" : "justify-start",
+                    )}
                   >
                     <div
                       className={cn(
                         "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px]",
-                        isLocal ? "bg-brand text-white" : "bg-gray-100 text-gray-900",
+                        isLocal
+                          ? "bg-brand text-white"
+                          : "bg-gray-100 text-gray-900",
                       )}
                     >
                       <p
@@ -1155,9 +1391,13 @@ function CallRoomContent({
                           isLocal ? "text-white/60" : "text-gray-400",
                         )}
                       >
-                        {isLocal ? "You" : chatMessage.from?.name || patientName}
+                        {isLocal
+                          ? "You"
+                          : chatMessage.from?.name || patientName}
                       </p>
-                      <p className="break-words leading-relaxed">{chatMessage.message}</p>
+                      <p className="break-words leading-relaxed">
+                        {chatMessage.message}
+                      </p>
                     </div>
                   </div>
                 );

@@ -20,7 +20,11 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { getRateLimitDescription, isNetworkError, isRateLimitError } from "@/lib/api";
+import {
+  getRateLimitDescription,
+  isNetworkError,
+  isRateLimitError,
+} from "@/lib/api";
 import { notifyApiError, notifySuccess } from "@/lib/notify";
 import {
   createPublicAccessSession,
@@ -28,7 +32,11 @@ import {
   readPublicMagicTokenFromHash,
   scrubPublicMagicTokenFromUrl,
 } from "@/lib/public-api";
-import type { PublicAppointment, PublicAvailableSlot, PublicAvailableSlotsResponse } from "@/types/public";
+import type {
+  PublicAppointment,
+  PublicAvailableSlot,
+  PublicAvailableSlotsResponse,
+} from "@/types/public";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +48,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import {
   Dialog,
   DialogContent,
@@ -123,7 +132,9 @@ function AppointmentPageClient() {
   const [cancelReason, setCancelReason] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [selectedSlot, setSelectedSlot] = useState<PublicAvailableSlot | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<PublicAvailableSlot | null>(
+    null,
+  );
   const [accessReady, setAccessReady] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -156,13 +167,17 @@ function AppointmentPageClient() {
     }
 
     void bootstrapAccess();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [appointmentId]);
 
   const appointmentQuery = useQuery({
     queryKey: ["public-appointment", appointmentId],
     queryFn: async () => {
-      const { data } = await publicApi.get<PublicAppointment>(`/public/appointments/${appointmentId}`);
+      const { data } = await publicApi.get<PublicAppointment>(
+        `/public/appointments/${appointmentId}`,
+      );
       return data;
     },
     enabled: accessReady && Boolean(appointmentId),
@@ -181,7 +196,13 @@ function AppointmentPageClient() {
   }, [today]);
 
   const slotsQuery = useQuery({
-    queryKey: ["public-appointment-slots", appointment?.doctor_id, appointmentId, slotsRange.from, slotsRange.to],
+    queryKey: [
+      "public-appointment-slots",
+      appointment?.doctor_id,
+      appointmentId,
+      slotsRange.from,
+      slotsRange.to,
+    ],
     queryFn: async () => {
       const { data } = await publicApi.get<PublicAvailableSlotsResponse>(
         `/public/doctors/${appointment?.doctor_id}/available-slots`,
@@ -189,18 +210,29 @@ function AppointmentPageClient() {
       );
       return data;
     },
-    enabled: Boolean(accessReady && appointment?.doctor_id && rescheduleOpen && appointment.can_reschedule),
+    enabled: Boolean(
+      accessReady &&
+      appointment?.doctor_id &&
+      rescheduleOpen &&
+      appointment.can_reschedule,
+    ),
     retry: false,
   });
 
-  const groupedSlots = useMemo(() => groupSlotsByDate(slotsQuery.data?.slots ?? []), [slotsQuery.data?.slots]);
+  const groupedSlots = useMemo(
+    () => groupSlotsByDate(slotsQuery.data?.slots ?? []),
+    [slotsQuery.data?.slots],
+  );
   const availableDates = useMemo(
-    () => Object.keys(groupedSlots).map((value) => parseISO(`${value}T00:00:00`)),
+    () =>
+      Object.keys(groupedSlots).map((value) => parseISO(`${value}T00:00:00`)),
     [groupedSlots],
   );
   const activeDate = selectedDate ?? availableDates[0];
   const activeDateKey = activeDate ? format(activeDate, "yyyy-MM-dd") : "";
-  const activeDateSlots = activeDateKey ? groupedSlots[activeDateKey] ?? [] : [];
+  const activeDateSlots = activeDateKey
+    ? (groupedSlots[activeDateKey] ?? [])
+    : [];
   const slotsLoadError = slotsQuery.error;
 
   const cancelMutation = useMutation({
@@ -209,10 +241,15 @@ function AppointmentPageClient() {
         reason: cancelReason.trim() || undefined,
       }),
     onSuccess: () => {
-      notifySuccess("Appointment cancelled", "The booking has been cancelled successfully.");
+      notifySuccess(
+        "Appointment cancelled",
+        "The booking has been cancelled successfully.",
+      );
       setCancelOpen(false);
       setCancelReason("");
-      queryClient.invalidateQueries({ queryKey: ["public-appointment", appointmentId] });
+      queryClient.invalidateQueries({
+        queryKey: ["public-appointment", appointmentId],
+      });
     },
     onError: (error) => notifyApiError(error, "Couldn't cancel appointment"),
   });
@@ -230,47 +267,91 @@ function AppointmentPageClient() {
       return data;
     },
     onSuccess: (data) => {
-      notifySuccess("Appointment rescheduled", "Your booking has been moved to the new slot.");
+      notifySuccess(
+        "Appointment rescheduled",
+        "Your booking has been moved to the new slot.",
+      );
       setRescheduleOpen(false);
       setSelectedSlot(null);
       setSelectedDate(undefined);
       setRescheduleReason("");
       router.replace(`/public/appointments/${data.new_appointment_id}`);
     },
-    onError: (error) => notifyApiError(error, "Couldn't reschedule appointment"),
+    onError: (error) =>
+      notifyApiError(error, "Couldn't reschedule appointment"),
   });
 
   const summaryItems = useMemo(() => {
     if (!appointment) return [];
     return [
-      { label: "Doctor", value: appointment.doctor_name || "Assigned doctor", icon: Stethoscope },
-      { label: "Schedule", value: format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy · hh:mm a"), icon: CalendarDays },
-      { label: "Mode", value: modeLabel(appointment.mode), icon: appointment.mode === "online" ? Video : MapPin },
-      { label: "Consultation", value: appointment.consultation_fee ? `₹${appointment.consultation_fee}` : "Included", icon: Clock3 },
+      {
+        label: "Doctor",
+        value: appointment.doctor_name || "Assigned doctor",
+        icon: Stethoscope,
+      },
+      {
+        label: "Schedule",
+        value: format(
+          parseISO(appointment.scheduled_at),
+          "EEE, dd MMM yyyy · hh:mm a",
+        ),
+        icon: CalendarDays,
+      },
+      {
+        label: "Mode",
+        value: modeLabel(appointment.mode),
+        icon: appointment.mode === "online" ? Video : MapPin,
+      },
+      {
+        label: "Consultation",
+        value: appointment.consultation_fee
+          ? `₹${appointment.consultation_fee}`
+          : "Included",
+        icon: Clock3,
+      },
     ];
   }, [appointment]);
 
   const isOnlineConfirmed =
-    appointment?.video_enabled && appointment.mode === "online" && appointment.status === "confirmed";
+    appointment?.video_enabled &&
+    appointment.mode === "online" &&
+    appointment.status === "confirmed";
 
   const { isJoinWindowOpen, joinMessage, isTooLate } = useMemo(() => {
-    if (!appointment?.scheduled_at) return { isJoinWindowOpen: false, joinMessage: "", isTooLate: false };
-    const scheduledTime = parseISO(appointment.scheduled_at).getTime();
+    if (!appointment?.scheduled_at)
+      return { isJoinWindowOpen: false, joinMessage: "", isTooLate: false };
+    const scheduledTime = parseISO(appointment?.scheduled_at).getTime();
     const start = scheduledTime - 10 * 60 * 1000;
     const end = scheduledTime + 30 * 60 * 1000;
     const current = currentTime.getTime();
-    
+
     if (current < start) {
       const mins = Math.ceil((start - current) / 60000);
       if (mins > 60) {
-        return { isJoinWindowOpen: false, joinMessage: `Join available 10 mins before`, isTooLate: false };
+        return {
+          isJoinWindowOpen: false,
+          joinMessage: `Join available 10 mins before`,
+          isTooLate: false,
+        };
       }
-      return { isJoinWindowOpen: false, joinMessage: `Join available in ${mins} min${mins !== 1 ? 's' : ''}`, isTooLate: false };
+      return {
+        isJoinWindowOpen: false,
+        joinMessage: `Join available in ${mins} min${mins !== 1 ? "s" : ""}`,
+        isTooLate: false,
+      };
     }
     if (current > end) {
-      return { isJoinWindowOpen: false, joinMessage: "Call window has ended", isTooLate: true };
+      return {
+        isJoinWindowOpen: false,
+        joinMessage: "Call window has ended",
+        isTooLate: true,
+      };
     }
-    return { isJoinWindowOpen: true, joinMessage: "Join video consultation", isTooLate: false };
+    return {
+      isJoinWindowOpen: true,
+      joinMessage: "Join video consultation",
+      isTooLate: false,
+    };
   }, [appointment?.scheduled_at, currentTime]);
 
   // ── Loading ──────────────────────────────────────────────────────
@@ -312,7 +393,10 @@ function AppointmentPageClient() {
             description={`${getRateLimitDescription(appointmentLoadError)} Then refresh the appointment page.`}
             tone="warning"
             action={
-              <Button className="mt-6 rounded-xl" onClick={() => appointmentQuery.refetch()}>
+              <Button
+                className="mt-6 rounded-xl"
+                onClick={() => appointmentQuery.refetch()}
+              >
                 Try again
               </Button>
             }
@@ -328,7 +412,10 @@ function AppointmentPageClient() {
             description="Check your network connection, then retry this appointment link."
             tone="warning"
             action={
-              <Button className="mt-6 rounded-xl" onClick={() => appointmentQuery.refetch()}>
+              <Button
+                className="mt-6 rounded-xl"
+                onClick={() => appointmentQuery.refetch()}
+              >
                 Try again
               </Button>
             }
@@ -361,10 +448,22 @@ function AppointmentPageClient() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3.5">
               <div className="flex h-11 w-11 items-center justify-center rounded-[1rem] bg-brand/[0.07] ring-1 ring-brand/10">
-                <Image src="/images/logo_wthout_text.svg" alt="eHomeo" width={24} height={24} className="h-6 w-6" />
+                <Image
+                  src="/images/logo_wthout_text.svg"
+                  alt="eHomeo"
+                  width={24}
+                  height={24}
+                  className="h-6 w-6"
+                />
               </div>
               <div>
-                <Image src="/images/logo.svg" alt="eHomeo" width={124} height={40} className="h-7 w-auto" />
+                <Image
+                  src="/images/logo.svg"
+                  alt="eHomeo"
+                  width={124}
+                  height={40}
+                  className="h-7 w-auto"
+                />
                 <p className="mt-0.5 text-[11px] font-medium text-brand-subtext/70 tracking-wide">
                   Private appointment access
                 </p>
@@ -373,19 +472,39 @@ function AppointmentPageClient() {
 
             <div className="flex flex-wrap items-center gap-3">
               {/* Animated status badge */}
-              <div className={cn("flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold shadow-sm", sc.badge)}>
+              <div
+                className={cn(
+                  "flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold shadow-sm",
+                  sc.badge,
+                )}
+              >
                 <span className="relative flex h-1.5 w-1.5">
-                  <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-60", sc.dot)} />
-                  <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", sc.dot)} />
+                  <span
+                    className={cn(
+                      "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
+                      sc.dot,
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "relative inline-flex h-1.5 w-1.5 rounded-full",
+                      sc.dot,
+                    )}
+                  />
                 </span>
                 {sc.label}
               </div>
 
               {isOnlineConfirmed && !isTooLate && (
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <motion.div
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
                   <Button
                     className="relative h-11 rounded-[1.2rem] bg-brand-accent px-6 text-sm font-bold text-brand-dark shadow-[0_8px_24px_rgba(216,238,83,0.35)] transition-all hover:-translate-y-0.5 hover:bg-[#d0e64b] hover:shadow-[0_12px_32px_rgba(216,238,83,0.45)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-                    onClick={() => router.push(`/public/appointments/${appointmentId}/call`)}
+                    onClick={() =>
+                      router.push(`/public/appointments/${appointmentId}/call`)
+                    }
                     disabled={!isJoinWindowOpen}
                   >
                     {isJoinWindowOpen && (
@@ -410,7 +529,8 @@ function AppointmentPageClient() {
                   {appointment.doctor_name || "Appointment details"}
                 </CardTitle>
                 <CardDescription className="text-sm text-brand-subtext">
-                  {appointment.patient_name || "Appointment holder"} &middot; {modeLabel(appointment.mode)}
+                  {appointment.patient_name || "Appointment holder"} &middot;{" "}
+                  {modeLabel(appointment.mode)}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -427,7 +547,9 @@ function AppointmentPageClient() {
                           <Icon className="h-3 w-3" />
                           {item.label}
                         </div>
-                        <p className="mt-2.5 text-sm font-semibold text-brand-dark">{item.value}</p>
+                        <p className="mt-2.5 text-sm font-semibold text-brand-dark">
+                          {item.value}
+                        </p>
                       </div>
                     );
                   })}
@@ -437,17 +559,25 @@ function AppointmentPageClient() {
                 <div className="rounded-[1.6rem] bg-brand-dark px-5 py-5 text-white">
                   <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/35">Patient</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/35">
+                        Patient
+                      </p>
                       <p className="mt-2 text-xl font-bold tracking-tight">
                         {appointment.patient_name || "Appointment holder"}
                       </p>
                       <p className="mt-1.5 text-sm text-white/55">
-                        {appointment.payment_choice === "pay_now" ? "Online payment" : "Pay at clinic"}
-                        {appointment.consultation_fee ? ` · ₹${appointment.consultation_fee}` : ""}
+                        {appointment.payment_choice === "pay_now"
+                          ? "Online payment"
+                          : "Pay at clinic"}
+                        {appointment.consultation_fee
+                          ? ` · ₹${appointment.consultation_fee}`
+                          : ""}
                       </p>
                     </div>
                     <div className="rounded-[1.2rem] border border-white/10 bg-white/[0.06] px-4 py-3.5">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/35">Change window</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/35">
+                        Change window
+                      </p>
                       <p className="mt-1.5 text-sm font-medium text-white/75">
                         {appointment.can_reschedule || appointment.can_cancel
                           ? `Open until ${appointment.cancel_window_hours}h before`
@@ -464,15 +594,26 @@ function AppointmentPageClient() {
           <motion.div {...fadeUp(0.13)} className="space-y-4">
             <Card className="rounded-[2rem] border-white/70 bg-white/92 shadow-[0_16px_60px_-28px_rgba(19,19,19,0.16)]">
               <CardHeader className="pb-3">
-                <CardTitle className="text-lg font-bold text-brand-dark">Quick actions</CardTitle>
-                <CardDescription className="text-sm">Manage this booking from here.</CardDescription>
+                <CardTitle className="text-lg font-bold text-brand-dark">
+                  Quick actions
+                </CardTitle>
+                <CardDescription className="text-sm">
+                  Manage this booking from here.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {isOnlineConfirmed && !isTooLate && (
-                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <motion.div
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
                     <Button
                       className="relative h-[56px] w-full justify-between rounded-[1.4rem] bg-brand-accent px-5 text-[15px] font-bold text-brand-dark shadow-[0_8px_32px_rgba(216,238,83,0.3)] transition-all hover:-translate-y-1 hover:bg-[#d0e64b] hover:shadow-[0_14px_40px_rgba(216,238,83,0.4)] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-                      onClick={() => router.push(`/public/appointments/${appointmentId}/call`)}
+                      onClick={() =>
+                        router.push(
+                          `/public/appointments/${appointmentId}/call`,
+                        )
+                      }
                       disabled={!isJoinWindowOpen}
                     >
                       {isJoinWindowOpen && (
@@ -512,27 +653,14 @@ function AppointmentPageClient() {
       </div>
 
       {/* ── Cancel dialog ── */}
-      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
-        <DialogContent className="max-w-xl rounded-[1.8rem] p-0">
-          <DialogHeader className="px-6 pt-6">
-            <DialogTitle>Cancel appointment</DialogTitle>
-            <DialogDescription>
-              This will update the booking immediately. You can optionally leave a note for the clinic.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 px-6 pb-6">
-            <div className="rounded-[1.4rem] bg-brand-bg px-4 py-4 text-sm leading-6 text-brand-dark">
-              {appointment.doctor_name || "Doctor"} &middot;{" "}
-              {format(parseISO(appointment.scheduled_at), "EEE, dd MMM yyyy · hh:mm a")}
-            </div>
-            <Input
-              value={cancelReason}
-              onChange={(e) => setCancelReason(e.target.value)}
-              placeholder="Reason for cancellation (optional)"
-              maxLength={500}
-            />
-          </div>
-          <DialogFooter>
+      <ResponsiveDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        title="Cancel appointment"
+        description="This will update the booking immediately. You can optionally leave a note for the clinic."
+        maxClassName="max-w-xl"
+        footer={
+          <>
             <Button variant="outline" onClick={() => setCancelOpen(false)}>
               Keep booking
             </Button>
@@ -543,12 +671,28 @@ function AppointmentPageClient() {
             >
               Confirm cancellation
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-[1.4rem] bg-brand-bg px-4 py-4 text-sm leading-6 text-brand-dark">
+            {appointment.doctor_name || "Doctor"} &middot;{" "}
+            {format(
+              parseISO(appointment.scheduled_at),
+              "EEE, dd MMM yyyy · hh:mm a",
+            )}
+          </div>
+          <Input
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Reason for cancellation (optional)"
+            maxLength={500}
+          />
+        </div>
+      </ResponsiveDialog>
 
       {/* ── Reschedule dialog ── */}
-      <Dialog
+      <ResponsiveDialog
         open={rescheduleOpen}
         onOpenChange={(open) => {
           setRescheduleOpen(open);
@@ -557,108 +701,11 @@ function AppointmentPageClient() {
             setSelectedSlot(null);
           }
         }}
-      >
-        <DialogContent className="max-w-5xl rounded-[1.8rem] p-0 max-h-[90vh] overflow-y-auto">
-          <DialogHeader className="px-6 pt-6">
-            <DialogTitle>Choose a new slot</DialogTitle>
-            <DialogDescription>
-              Pick a date from the doctor&apos;s live calendar, then select one of the available time slots.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-6 px-6 pb-6">
-            {/* ── Date Selection (Horizontal Scroller) ── */}
-            <div className="space-y-3">
-              <p className="text-sm font-semibold text-brand-dark">Select Date</p>
-              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                {availableDates.map((date) => {
-                  const isSelected = activeDate && format(date, "yyyy-MM-dd") === format(activeDate, "yyyy-MM-dd");
-                  return (
-                    <button
-                      key={date.toISOString()}
-                      onClick={() => {
-                        setSelectedDate(date);
-                        setSelectedSlot(null);
-                      }}
-                      className={cn(
-                        "flex min-w-[72px] flex-col items-center rounded-2xl border-2 px-3 py-3 transition-all duration-200",
-                        isSelected
-                          ? "border-brand bg-brand/5 text-brand shadow-lg shadow-brand/10"
-                          : "border-slate-100 bg-white text-slate-500 hover:border-brand/30 hover:bg-brand-bg"
-                      )}
-                    >
-                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
-                        {format(date, "EEE")}
-                      </span>
-                      <span className="text-lg font-black">{format(date, "dd")}</span>
-                      <span className="text-[10px] font-medium">{format(date, "MMM")}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ── Time Slots ── */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-brand-dark">
-                  Available on {activeDate ? format(activeDate, "EEEE, dd MMM") : "..."}
-                </p>
-                {!slotsQuery.isLoading && (
-                  <Badge variant="outline" className="border-brand/20 bg-brand/5 text-brand-dark">
-                    {activeDateSlots.length} slots
-                  </Badge>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {slotsQuery.isLoading ? (
-                  <div className="col-span-full flex items-center gap-2 rounded-2xl bg-brand-bg px-4 py-8 text-sm text-brand-subtext">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading available slots...
-                  </div>
-                ) : activeDateSlots.length === 0 ? (
-                  <div className="col-span-full rounded-2xl bg-brand-bg px-4 py-12 text-center text-sm text-brand-subtext">
-                    No slots are open for this date.
-                  </div>
-                ) : (
-                  activeDateSlots.map((slot) => {
-                    const active = selectedSlot?.start === slot.start;
-                    return (
-                      <button
-                        key={slot.start}
-                        onClick={() => setSelectedSlot(slot)}
-                        className={cn(
-                          "group relative flex flex-col items-center justify-center rounded-2xl border-2 px-4 py-4 transition-all",
-                          active
-                            ? "border-brand bg-brand text-white shadow-lg shadow-brand/20"
-                            : "border-slate-100 bg-white hover:border-brand/30 hover:bg-brand-bg"
-                        )}
-                      >
-                        <span className="text-sm font-bold">{format(parseISO(slot.start), "hh:mm a")}</span>
-                        <span className={cn("mt-1 text-[10px] font-medium", active ? "text-white/70" : "text-brand-subtext/60")}>
-                          {slot.duration_minutes} min
-                        </span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <Separator className="bg-slate-100" />
-
-            <div className="space-y-3">
-              <p className="text-sm font-semibold text-brand-dark">Note for the clinic</p>
-              <Input
-                value={rescheduleReason}
-                onChange={(e) => setRescheduleReason(e.target.value)}
-                placeholder="Why are you rescheduling? (Optional)"
-                className="rounded-2xl border-slate-100 bg-white px-4 py-6 text-sm shadow-sm transition-all focus:border-brand/30 focus:ring-brand/10"
-                maxLength={500}
-              />
-            </div>
-          </div>
-          <DialogFooter>
+        title="Choose a new slot"
+        description="Pick a date from the doctor's live calendar, then select one of the available time slots."
+        maxClassName="max-w-5xl"
+        footer={
+          <>
             <Button variant="outline" onClick={() => setRescheduleOpen(false)}>
               Close
             </Button>
@@ -670,9 +717,123 @@ function AppointmentPageClient() {
               Confirm new slot
               <ArrowRight className="h-4 w-4" />
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        <div className="space-y-6">
+          {/* ── Date Selection (Horizontal Scroller) ── */}
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-brand-dark">Select Date</p>
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {availableDates.map((date) => {
+                const isSelected =
+                  activeDate &&
+                  format(date, "yyyy-MM-dd") ===
+                    format(activeDate, "yyyy-MM-dd");
+                return (
+                  <button
+                    key={date.toISOString()}
+                    onClick={() => {
+                      setSelectedDate(date);
+                      setSelectedSlot(null);
+                    }}
+                    className={cn(
+                      "flex min-w-[72px] flex-col items-center rounded-2xl border-2 px-3 py-3 transition-all duration-200",
+                      isSelected
+                        ? "border-brand bg-brand/5 text-brand shadow-lg shadow-brand/10"
+                        : "border-slate-100 bg-white text-slate-500 hover:border-brand/30 hover:bg-brand-bg",
+                    )}
+                  >
+                    <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
+                      {format(date, "EEE")}
+                    </span>
+                    <span className="text-lg font-black">
+                      {format(date, "dd")}
+                    </span>
+                    <span className="text-[10px] font-medium">
+                      {format(date, "MMM")}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Time Slots ── */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-brand-dark">
+                Available on{" "}
+                {activeDate ? format(activeDate, "EEEE, dd MMM") : "..."}
+              </p>
+              {!slotsQuery.isLoading && (
+                <Badge
+                  variant="outline"
+                  className="border-brand/20 bg-brand/5 text-brand-dark"
+                >
+                  {activeDateSlots.length} slots
+                </Badge>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {slotsQuery.isLoading ? (
+                <div className="col-span-full flex items-center gap-2 rounded-2xl bg-brand-bg px-4 py-8 text-sm text-brand-subtext">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading available slots...
+                </div>
+              ) : activeDateSlots.length === 0 ? (
+                <div className="col-span-full rounded-2xl bg-brand-bg px-4 py-12 text-center text-sm text-brand-subtext">
+                  No slots are open for this date.
+                </div>
+              ) : (
+                activeDateSlots.map((slot) => {
+                  const active = selectedSlot?.start === slot.start;
+                  return (
+                    <button
+                      key={slot.start}
+                      onClick={() => setSelectedSlot(slot)}
+                      className={cn(
+                        "group relative flex flex-col items-center justify-center rounded-2xl border-2 px-4 py-4 transition-all",
+                        active
+                          ? "border-brand bg-brand text-white shadow-lg shadow-brand/20"
+                          : "border-slate-100 bg-white hover:border-brand/30 hover:bg-brand-bg",
+                      )}
+                    >
+                      <span className="text-sm font-bold">
+                        {format(parseISO(slot.start), "hh:mm a")}
+                      </span>
+                      <span
+                        className={cn(
+                          "mt-1 text-[10px] font-medium",
+                          active ? "text-white/70" : "text-brand-subtext/60",
+                        )}
+                      >
+                        {slot.duration_minutes} min
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <Separator className="bg-slate-100" />
+
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-brand-dark">
+              Note for the clinic
+            </p>
+            <Input
+              value={rescheduleReason}
+              onChange={(e) => setRescheduleReason(e.target.value)}
+              placeholder="Why are you rescheduling? (Optional)"
+              className="rounded-2xl border-slate-100 bg-white px-4 py-6 text-sm shadow-sm transition-all focus:border-brand/30 focus:ring-brand/10"
+              maxLength={500}
+            />
+          </div>
+        </div>
+      </ResponsiveDialog>
     </PageShell>
   );
 }
@@ -706,15 +867,26 @@ function CenteredState({
   return (
     <>
       <div className="mb-8 flex items-center justify-center">
-        <Image src="/images/logo.svg" alt="eHomeo" width={160} height={52} className="h-10 w-auto" />
+        <Image
+          src="/images/logo.svg"
+          alt="eHomeo"
+          width={160}
+          height={52}
+          className="h-10 w-auto"
+        />
       </div>
       <motion.div {...fadeUp(0.05)}>
         <Card className="rounded-[2rem] border-white/70 bg-white/95 shadow-[0_16px_60px_-28px_rgba(19,19,19,0.2)]">
           <CardHeader>
-            <Badge variant="outline" className={cn("w-fit text-xs font-semibold", badgeClasses)}>
+            <Badge
+              variant="outline"
+              className={cn("w-fit text-xs font-semibold", badgeClasses)}
+            >
               {tone === "warning" ? "Temporarily unavailable" : "Link invalid"}
             </Badge>
-            <CardTitle className="mt-2 text-2xl font-bold tracking-tight text-brand-dark">{title}</CardTitle>
+            <CardTitle className="mt-2 text-2xl font-bold tracking-tight text-brand-dark">
+              {title}
+            </CardTitle>
             <CardDescription className="max-w-xl text-sm leading-6 text-brand-subtext">
               {description}
             </CardDescription>
@@ -726,4 +898,6 @@ function CenteredState({
   );
 }
 
-export default dynamic(() => Promise.resolve(AppointmentPageClient), { ssr: false });
+export default dynamic(() => Promise.resolve(AppointmentPageClient), {
+  ssr: false,
+});

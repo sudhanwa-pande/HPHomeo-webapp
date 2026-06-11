@@ -35,10 +35,7 @@ export function ConsultationSection({
               Video consultation is not available. Proceed to the prescription
               when ready.
             </p>
-            <Button
-              className="mt-4 rounded-xl"
-              onClick={onOpenPrescription}
-            >
+            <Button className="mt-4 rounded-xl" onClick={onOpenPrescription}>
               <FileText className="h-4 w-4" />
               Write Prescription
             </Button>
@@ -83,14 +80,6 @@ export function ConsultationSection({
             <FileText className="h-4 w-4" />
             Write Prescription
           </Button>
-          <Button
-            variant="outline"
-            className="rounded-xl"
-            onClick={() => router.push(`/doctor/call/${appointmentId}`)}
-          >
-            <MonitorPlay className="h-4 w-4" />
-            Full-screen Call
-          </Button>
         </div>
 
         {/* Mobile FAB: "Write Rx" floats at the bottom for quick mode-switch */}
@@ -127,38 +116,11 @@ export function ConsultationSection({
           </Button>
         }
       >
-        <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="mt-2">
           <ConsultationCallPanel
             appointmentId={appointmentId}
             appointment={appointment}
           />
-          <div className="hidden 2xl:block">
-            <div className="rounded-xl bg-brand-bg/50 p-4">
-              <p className="text-xs font-semibold text-brand-subtext/70">
-                Quick actions
-              </p>
-              <div className="mt-3 space-y-2">
-                <Button
-                  variant="outline"
-                  className="w-full justify-start rounded-xl"
-                  onClick={onOpenPrescription}
-                >
-                  <FileText className="h-4 w-4" />
-                  Write Prescription
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start rounded-xl"
-                  onClick={() =>
-                    router.push(`/doctor/call/${appointmentId}`)
-                  }
-                >
-                  <MonitorPlay className="h-4 w-4" />
-                  Full-screen Call
-                </Button>
-              </div>
-            </div>
-          </div>
         </div>
       </SectionShell>
     </div>

@@ -1,5 +1,19 @@
-import { Room, RoomEvent, DisconnectReason, ConnectionState as RoomConnectionState, ConnectionQuality, Track, LocalVideoTrack, LocalAudioTrack, createLocalVideoTrack, createLocalAudioTrack } from "livekit-client";
-import { LIVEKIT_ROOM_OPTIONS, LIVEKIT_AUDIO_CAPTURE_OPTIONS } from "@/lib/media";
+import {
+  Room,
+  RoomEvent,
+  DisconnectReason,
+  ConnectionState as RoomConnectionState,
+  ConnectionQuality,
+  Track,
+  LocalVideoTrack,
+  LocalAudioTrack,
+  createLocalVideoTrack,
+  createLocalAudioTrack,
+} from "livekit-client";
+import {
+  LIVEKIT_ROOM_OPTIONS,
+  LIVEKIT_AUDIO_CAPTURE_OPTIONS,
+} from "@/lib/media";
 import type { CameraFacingMode } from "@/lib/media";
 import { useCallStore } from "@/stores/call-store";
 import type { CallState } from "@/stores/call-store";
@@ -21,14 +35,16 @@ function decodeJwt(token: string): any {
     const base64Url = token.split(".")[1];
     if (!base64Url) return null;
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonPayload = typeof window !== "undefined"
-      ? decodeURIComponent(
-        window.atob(base64)
-          .split("")
-          .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-          .join("")
-      )
-      : Buffer.from(base64, "base64").toString("utf8");
+    const jsonPayload =
+      typeof window !== "undefined"
+        ? decodeURIComponent(
+            window
+              .atob(base64)
+              .split("")
+              .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+              .join(""),
+          )
+        : Buffer.from(base64, "base64").toString("utf8");
     return JSON.parse(jsonPayload);
   } catch (e) {
     console.error("Failed to decode JWT token:", e);
@@ -41,7 +57,9 @@ function getSessionVersionFromToken(token: string): number | null {
     const payload = decodeJwt(token);
     if (payload && typeof payload.metadata === "string") {
       const meta = JSON.parse(payload.metadata);
-      return typeof meta.session_version === "number" ? meta.session_version : null;
+      return typeof meta.session_version === "number"
+        ? meta.session_version
+        : null;
     }
   } catch (e) {
     console.warn("Failed to extract session version from token:", e);
@@ -97,8 +115,11 @@ class CallSessionManager {
   private storageEventListener: ((e: StorageEvent) => void) | null = null;
   private broadcastChannel: BroadcastChannel | null = null;
   private retryCount = 0;
+  private destroyPromise: Promise<void> | null = null;
 
-  private tokenRefresher: ((reason?: string, options?: { signal?: AbortSignal }) => Promise<string>) | null = null;
+  private tokenRefresher:
+    | ((reason?: string, options?: { signal?: AbortSignal }) => Promise<string>)
+    | null = null;
   private serverUrl: string | null = null;
   private appointmentId: string | null = null;
   private role: "doctor" | "patient" | "public" | null = null;
@@ -185,7 +206,10 @@ class CallSessionManager {
 
   private refreshPromise: Promise<string> | null = null;
 
-  private async safeRefreshToken(reason?: string, signal?: AbortSignal): Promise<string> {
+  private async safeRefreshToken(
+    reason?: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     if (!this.tokenRefresher) throw new Error("No token refresher available");
     if (!this.refreshPromise) {
       this.refreshPromise = (async () => {
@@ -247,9 +271,23 @@ class CallSessionManager {
     token: string,
     appointmentId: string,
     role: "doctor" | "patient" | "public",
-    tokenRefresher?: (reason?: string, options?: { signal?: AbortSignal }) => Promise<string>
+    tokenRefresher?: (
+      reason?: string,
+      options?: { signal?: AbortSignal },
+    ) => Promise<string>,
   ): Promise<void> {
-    this.checkTerminated();
+    // Wait for any in-flight destroy to finish first
+    if (this.destroyPromise) {
+      this.log("connect_waiting_for_destroy");
+      await this.destroyPromise;
+    }
+
+    // Reset termination flags first — connect() is a "start fresh" entry point.
+    // After a previous destroy() (e.g. doctor navigated away and back),
+    // we must allow the singleton to accept new connections.
+    this.isDestroyed = false;
+    this.isTerminating = false;
+
     if (this.connectPromise && this.connectingAppointmentId === appointmentId) {
       this.log("connect_deduplicated", { appointmentId });
       await this.connectPromise;
@@ -257,8 +295,6 @@ class CallSessionManager {
       return;
     }
 
-    this.isDestroyed = false;
-    this.isTerminating = false;
     this.sessionId = `csm-${++_sessionSeq}`;
 
     if (this.sessionReadyTimeout) clearTimeout(this.sessionReadyTimeout);
@@ -275,7 +311,13 @@ class CallSessionManager {
     }, 8000);
 
     this.connectingAppointmentId = appointmentId;
-    this.connectPromise = this._connectInternal(serverUrl, token, appointmentId, role, tokenRefresher);
+    this.connectPromise = this._connectInternal(
+      serverUrl,
+      token,
+      appointmentId,
+      role,
+      tokenRefresher,
+    );
 
     try {
       await this.connectPromise;
@@ -287,7 +329,9 @@ class CallSessionManager {
       }
     } catch (err) {
       if (this.rejectSessionReady) {
-        this.rejectSessionReady(err instanceof Error ? err : new Error(String(err)));
+        this.rejectSessionReady(
+          err instanceof Error ? err : new Error(String(err)),
+        );
         this.resolveSessionReady = null;
         this.rejectSessionReady = null;
       }
@@ -304,13 +348,19 @@ class CallSessionManager {
     token: string,
     appointmentId: string,
     role: "doctor" | "patient" | "public",
-    tokenRefresher?: (reason?: string, options?: { signal?: AbortSignal }) => Promise<string>,
-    recoverySeq?: number
+    tokenRefresher?: (
+      reason?: string,
+      options?: { signal?: AbortSignal },
+    ) => Promise<string>,
+    recoverySeq?: number,
   ): Promise<Room | null> {
     this.checkTerminated();
     // Stale sequence check
     if (recoverySeq !== undefined && recoverySeq !== this.tokenRefreshSeq) {
-      this.log("connect_aborted_stale_seq", { recoverySeq, currentSeq: this.tokenRefreshSeq });
+      this.log("connect_aborted_stale_seq", {
+        recoverySeq,
+        currentSeq: this.tokenRefreshSeq,
+      });
       return null;
     }
 
@@ -329,12 +379,21 @@ class CallSessionManager {
     const parsedEpoch = getEpochFromToken(token);
     const parsedTokenId = getTokenIdFromToken(token);
 
-    this.log("token_parsed", { parsedSessionId, currentSessionId: this.sessionId, parsedEpoch, currentEpoch: this.epoch, parsedTokenId });
+    this.log("token_parsed", {
+      parsedSessionId,
+      currentSessionId: this.sessionId,
+      parsedEpoch,
+      currentEpoch: this.epoch,
+      parsedTokenId,
+    });
 
     if (parsedSessionId && parsedEpoch !== null) {
       // Enforce on client: Before connect, reject if the token has a stale epoch for this session ID
       if (parsedSessionId === this.sessionId && parsedEpoch < this.epoch) {
-        this.log("token_rejected_stale_epoch", { parsedEpoch, currentEpoch: this.epoch });
+        this.log("token_rejected_stale_epoch", {
+          parsedEpoch,
+          currentEpoch: this.epoch,
+        });
         throw new Error("Stale token epoch");
       }
     }
@@ -361,11 +420,18 @@ class CallSessionManager {
     }
 
     if (this.room) {
-      if (!shouldHardKill && (this.room.state === RoomConnectionState.Connected || this.room.state === RoomConnectionState.Connecting)) {
+      if (
+        !shouldHardKill &&
+        (this.room.state === RoomConnectionState.Connected ||
+          this.room.state === RoomConnectionState.Connecting)
+      ) {
         this.log("connect_noop", { state: this.room.state });
         return this.room;
       }
-      this.log("connect_cleanup_existing", { state: this.room.state, shouldHardKill });
+      this.log("connect_cleanup_existing", {
+        state: this.room.state,
+        shouldHardKill,
+      });
       await this.destroyRoomOnly();
       this.checkTerminated();
     }
@@ -391,20 +457,28 @@ class CallSessionManager {
           this.broadcastChannel.close();
           this.broadcastChannel = null;
         }
-        this.broadcastChannel = new BroadcastChannel(`call-session-${appointmentId}`);
+        this.broadcastChannel = new BroadcastChannel(
+          `call-session-${appointmentId}`,
+        );
 
         this.broadcastChannel.onmessage = async (event) => {
           const remoteSessionId = event.data?.sessionId;
-          const remoteEpoch = typeof event.data?.epoch === "number" ? event.data.epoch : 1;
+          const remoteEpoch =
+            typeof event.data?.epoch === "number" ? event.data.epoch : 1;
 
           if (event.data?.type === "JOIN_ATTEMPT") {
             if (remoteSessionId === this.sessionId) {
               if (remoteEpoch > this.epoch) {
                 // Incoming tab has lost ownership warning or authority over us
-                this.log("broadcast_lost_ownership_join_attempt", { remoteEpoch, localEpoch: this.epoch });
+                this.log("broadcast_lost_ownership_join_attempt", {
+                  remoteEpoch,
+                  localEpoch: this.epoch,
+                });
                 const currentStore = useCallStore.getState();
                 await this.destroy();
-                currentStore._setError("Call active in another window (lost ownership)");
+                currentStore._setError(
+                  "Call active in another window (lost ownership)",
+                );
                 notifyError("Call active in another window (lost ownership)");
                 this.setCallState("ended");
               } else if (remoteEpoch < this.epoch) {
@@ -412,26 +486,35 @@ class CallSessionManager {
                 this.broadcastChannel?.postMessage({
                   type: "SESSION_ACTIVE",
                   sessionId: this.sessionId,
-                  epoch: this.epoch
+                  epoch: this.epoch,
                 });
               }
             } else {
               // Different session: if active, tell them we are active
-              if (this.room && (this.room.state === RoomConnectionState.Connected || this.room.state === RoomConnectionState.Connecting)) {
+              if (
+                this.room &&
+                (this.room.state === RoomConnectionState.Connected ||
+                  this.room.state === RoomConnectionState.Connecting)
+              ) {
                 this.broadcastChannel?.postMessage({
                   type: "SESSION_ACTIVE",
                   sessionId: this.sessionId,
-                  epoch: this.epoch
+                  epoch: this.epoch,
                 });
               }
             }
           } else if (event.data?.type === "SESSION_ACTIVE") {
             if (remoteSessionId === this.sessionId) {
               if (remoteEpoch > this.epoch) {
-                this.log("broadcast_lost_ownership_session_active", { remoteEpoch, localEpoch: this.epoch });
+                this.log("broadcast_lost_ownership_session_active", {
+                  remoteEpoch,
+                  localEpoch: this.epoch,
+                });
                 const currentStore = useCallStore.getState();
                 await this.destroy();
-                currentStore._setError("Call active in another window (lost ownership)");
+                currentStore._setError(
+                  "Call active in another window (lost ownership)",
+                );
                 notifyError("Call active in another window (lost ownership)");
                 this.setCallState("ended");
               }
@@ -449,7 +532,7 @@ class CallSessionManager {
           type: "JOIN_ATTEMPT",
           sessionId: this.sessionId,
           epoch: this.epoch,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
       }
 
@@ -490,8 +573,12 @@ class CallSessionManager {
           currentStore._setCallStartedAt(Date.now());
         }
 
-        const hasSubscribedTracks = Array.from(room.remoteParticipants.values()).some((p) =>
-          p.getTrackPublications().some((pub) => pub.track !== undefined && pub.isSubscribed)
+        const hasSubscribedTracks = Array.from(
+          room.remoteParticipants.values(),
+        ).some((p) =>
+          p
+            .getTrackPublications()
+            .some((pub) => pub.track !== undefined && pub.isSubscribed),
         );
         currentStore._setRemoteJoined(hasSubscribedTracks);
         this.log("CONNECTED");
@@ -537,7 +624,7 @@ class CallSessionManager {
         const terminalReasons = [
           DisconnectReason.SERVER_SHUTDOWN,
           DisconnectReason.ROOM_DELETED,
-          DisconnectReason.PARTICIPANT_REMOVED
+          DisconnectReason.PARTICIPANT_REMOVED,
         ];
 
         if (reason !== undefined && terminalReasons.includes(reason)) {
@@ -553,14 +640,20 @@ class CallSessionManager {
         if (this.room !== room) return;
         const currentStore = useCallStore.getState();
         currentStore._setRemoteJoined(true);
-        this.log("REMOTE_JOINED", { remoteCount: room.remoteParticipants.size });
+        this.log("REMOTE_JOINED", {
+          remoteCount: room.remoteParticipants.size,
+        });
       });
 
       room.on(RoomEvent.TrackUnsubscribed, () => {
         if (this.room !== room) return;
         const currentStore = useCallStore.getState();
-        const hasSubscribedTracks = Array.from(room.remoteParticipants.values()).some((p) =>
-          p.getTrackPublications().some((pub) => pub.track !== undefined && pub.isSubscribed)
+        const hasSubscribedTracks = Array.from(
+          room.remoteParticipants.values(),
+        ).some((p) =>
+          p
+            .getTrackPublications()
+            .some((pub) => pub.track !== undefined && pub.isSubscribed),
         );
         currentStore._setRemoteJoined(hasSubscribedTracks);
         this.log("track_unsubscribed", { hasSubscribedTracks });
@@ -569,76 +662,107 @@ class CallSessionManager {
       room.on(RoomEvent.ParticipantDisconnected, () => {
         if (this.room !== room) return;
         const currentStore = useCallStore.getState();
-        const hasSubscribedTracks = Array.from(room.remoteParticipants.values()).some((p) =>
-          p.getTrackPublications().some((pub) => pub.track !== undefined && pub.isSubscribed)
+        const hasSubscribedTracks = Array.from(
+          room.remoteParticipants.values(),
+        ).some((p) =>
+          p
+            .getTrackPublications()
+            .some((pub) => pub.track !== undefined && pub.isSubscribed),
         );
         currentStore._setRemoteJoined(hasSubscribedTracks);
-        this.log("participant_disconnected", { remoteCount: room.remoteParticipants.size });
+        this.log("participant_disconnected", {
+          remoteCount: room.remoteParticipants.size,
+        });
       });
 
-      room.on(RoomEvent.ConnectionQualityChanged, async (quality: ConnectionQuality) => {
-        if (this.room !== room) return;
-        this.log("connection_quality_changed", { quality });
+      room.on(
+        RoomEvent.ConnectionQualityChanged,
+        async (quality: ConnectionQuality) => {
+          if (this.room !== room) return;
+          this.log("connection_quality_changed", { quality });
 
-        if (
-          quality === ConnectionQuality.Good ||
-          quality === ConnectionQuality.Excellent ||
-          quality === ConnectionQuality.Unknown
-        ) {
-          const currentStore = useCallStore.getState();
-          if (currentStore.error?.includes("network quality")) {
-            currentStore._setError(null);
-          }
+          if (
+            quality === ConnectionQuality.Good ||
+            quality === ConnectionQuality.Excellent ||
+            quality === ConnectionQuality.Unknown
+          ) {
+            const currentStore = useCallStore.getState();
+            if (currentStore.error?.includes("network quality")) {
+              currentStore._setError(null);
+            }
 
-          if (this.isBitrateReduced && Date.now() - this.lastQualityChangeTime > 8000) {
-            const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
-            if (camPub?.track instanceof LocalVideoTrack && !camPub.track.isMuted) {
-              this.log("restoring_bitrate_good_quality");
-              const sender = camPub.track.sender;
-              if (sender) {
-                try {
-                  const parameters = sender.getParameters();
-                  if (parameters.encodings && parameters.encodings[0]) {
-                    delete parameters.encodings[0].maxBitrate;
-                    await sender.setParameters(parameters);
+            if (
+              this.isBitrateReduced &&
+              Date.now() - this.lastQualityChangeTime > 8000
+            ) {
+              const camPub = room.localParticipant.getTrackPublication(
+                Track.Source.Camera,
+              );
+              if (
+                camPub?.track instanceof LocalVideoTrack &&
+                !camPub.track.isMuted
+              ) {
+                this.log("restoring_bitrate_good_quality");
+                const sender = camPub.track.sender;
+                if (sender) {
+                  try {
+                    const parameters = sender.getParameters();
+                    if (parameters.encodings && parameters.encodings[0]) {
+                      delete parameters.encodings[0].maxBitrate;
+                      await sender.setParameters(parameters);
+                    }
+                  } catch (err) {
+                    this.log("failed_to_restore_bitrate", {
+                      error: String(err),
+                    });
                   }
-                } catch (err) {
-                  this.log("failed_to_restore_bitrate", { error: String(err) });
                 }
+                this.isBitrateReduced = false;
+                this.lastQualityChangeTime = Date.now();
               }
-              this.isBitrateReduced = false;
-              this.lastQualityChangeTime = Date.now();
             }
           }
-        }
 
-        if (quality === ConnectionQuality.Poor) {
-          this.log("poor_quality_detected");
-          const currentStore = useCallStore.getState();
-          currentStore._setError("Weak network quality detected. Video quality may be reduced.");
+          if (quality === ConnectionQuality.Poor) {
+            this.log("poor_quality_detected");
+            const currentStore = useCallStore.getState();
+            currentStore._setError(
+              "Weak network quality detected. Video quality may be reduced.",
+            );
 
-          if (!this.isBitrateReduced && Date.now() - this.lastQualityChangeTime > 5000) {
-            const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
-            if (camPub?.track instanceof LocalVideoTrack && !camPub.track.isMuted) {
-              this.log("reducing_bitrate_poor_quality");
-              const sender = camPub.track.sender;
-              if (sender) {
-                try {
-                  const parameters = sender.getParameters();
-                  if (parameters.encodings && parameters.encodings[0]) {
-                    parameters.encodings[0].maxBitrate = 150_000;
-                    await sender.setParameters(parameters);
+            if (
+              !this.isBitrateReduced &&
+              Date.now() - this.lastQualityChangeTime > 5000
+            ) {
+              const camPub = room.localParticipant.getTrackPublication(
+                Track.Source.Camera,
+              );
+              if (
+                camPub?.track instanceof LocalVideoTrack &&
+                !camPub.track.isMuted
+              ) {
+                this.log("reducing_bitrate_poor_quality");
+                const sender = camPub.track.sender;
+                if (sender) {
+                  try {
+                    const parameters = sender.getParameters();
+                    if (parameters.encodings && parameters.encodings[0]) {
+                      parameters.encodings[0].maxBitrate = 150_000;
+                      await sender.setParameters(parameters);
+                    }
+                  } catch (err) {
+                    this.log("failed_to_reduce_bitrate", {
+                      error: String(err),
+                    });
                   }
-                } catch (err) {
-                  this.log("failed_to_reduce_bitrate", { error: String(err) });
                 }
+                this.isBitrateReduced = true;
+                this.lastQualityChangeTime = Date.now();
               }
-              this.isBitrateReduced = true;
-              this.lastQualityChangeTime = Date.now();
             }
           }
-        }
-      });
+        },
+      );
 
       if (this.isDestroyed) {
         this.log("connect_aborted_pre_connect");
@@ -650,7 +774,10 @@ class CallSessionManager {
 
       if (this.isDestroyed || this.room !== room) {
         this.log("connect_aborted_post_connect");
-        try { room.removeAllListeners(); room.disconnect(true); } catch { }
+        try {
+          room.removeAllListeners();
+          room.disconnect(true);
+        } catch {}
         return null;
       }
 
@@ -669,7 +796,11 @@ class CallSessionManager {
       // Foreground app focus recovery handler: handles muted/frozen media on mobile backgrounding
       if (typeof document !== "undefined") {
         this.visibilityListener = async () => {
-          if (document.visibilityState === "visible" && this.room && this.room.state === RoomConnectionState.Connected) {
+          if (
+            document.visibilityState === "visible" &&
+            this.room &&
+            this.room.state === RoomConnectionState.Connected
+          ) {
             // Guard: skip recovery if publishing or already in active recovery loop or connecting
             if (this.isPublishing || this.isRecovering || this.connectPromise) {
               this.log("visibility_recovery_skipped_due_to_active_recovery");
@@ -691,26 +822,42 @@ class CallSessionManager {
               this.lastForegroundRecoveryTime = Date.now();
 
               const roomRef = this.room;
-              const cameraPub = roomRef.localParticipant.getTrackPublication(Track.Source.Camera);
-              const micPub = roomRef.localParticipant.getTrackPublication(Track.Source.Microphone);
+              const cameraPub = roomRef.localParticipant.getTrackPublication(
+                Track.Source.Camera,
+              );
+              const micPub = roomRef.localParticipant.getTrackPublication(
+                Track.Source.Microphone,
+              );
 
               const camTrack = cameraPub?.track;
               const micTrack = micPub?.track;
 
-              const isCamDead = !camTrack || camTrack.mediaStreamTrack.readyState !== "live" || camTrack.mediaStreamTrack.muted;
-              const isMicDead = !micTrack || micTrack.mediaStreamTrack.readyState !== "live";
+              const isCamDead =
+                !camTrack ||
+                camTrack.mediaStreamTrack.readyState !== "live" ||
+                camTrack.mediaStreamTrack.muted;
+              const isMicDead =
+                !micTrack || micTrack.mediaStreamTrack.readyState !== "live";
 
               if (isCamDead || isMicDead) {
-                this.log("recover_tracks_on_foreground", { isCamDead, isMicDead });
+                this.log("recover_tracks_on_foreground", {
+                  isCamDead,
+                  isMicDead,
+                });
 
                 // 1. Unpublish first & stop track to guarantee clean hardware release
                 if (cameraPub?.track) {
                   try {
                     this.log("visibility_unpublishing_old_cam_track");
-                    await roomRef.localParticipant.unpublishTrack(cameraPub.track);
+                    await roomRef.localParticipant.unpublishTrack(
+                      cameraPub.track,
+                    );
                     cameraPub.track.stop();
                   } catch (e) {
-                    console.warn("Failed to unpublish/stop camera track during visibility recovery:", e);
+                    console.warn(
+                      "Failed to unpublish/stop camera track during visibility recovery:",
+                      e,
+                    );
                   }
                 }
                 if (micPub?.track) {
@@ -719,7 +866,10 @@ class CallSessionManager {
                     await roomRef.localParticipant.unpublishTrack(micPub.track);
                     micPub.track.stop();
                   } catch (e) {
-                    console.warn("Failed to unpublish/stop mic track during visibility recovery:", e);
+                    console.warn(
+                      "Failed to unpublish/stop mic track during visibility recovery:",
+                      e,
+                    );
                   }
                 }
 
@@ -736,8 +886,14 @@ class CallSessionManager {
                   return;
                 }
 
-                const existingCam = roomRef.localParticipant.getTrackPublication(Track.Source.Camera);
-                const existingMic = roomRef.localParticipant.getTrackPublication(Track.Source.Microphone);
+                const existingCam =
+                  roomRef.localParticipant.getTrackPublication(
+                    Track.Source.Camera,
+                  );
+                const existingMic =
+                  roomRef.localParticipant.getTrackPublication(
+                    Track.Source.Microphone,
+                  );
                 if (existingCam?.track || existingMic?.track) {
                   this.log("visibility_recovery_skipped_already_published");
                   return;
@@ -747,7 +903,13 @@ class CallSessionManager {
                 try {
                   const hadVideo = cameraPub?.isMuted === false || !!camTrack;
                   const hadAudio = micPub?.isMuted === false || !!micTrack;
-                  await this.publishTracks(hadAudio, hadVideo, undefined, this.videoDeviceId, this.audioDeviceId);
+                  await this.publishTracks(
+                    hadAudio,
+                    hadVideo,
+                    undefined,
+                    this.videoDeviceId,
+                    this.audioDeviceId,
+                  );
                   this.checkTerminated();
                 } catch (e) {
                   this.log("foreground_recovery_failed", { error: String(e) });
@@ -778,11 +940,12 @@ class CallSessionManager {
 
       this.log("connect_complete");
       return room;
-
     } catch (err) {
       this.log("connect_error", { error: String(err) });
       const currentStore = useCallStore.getState();
-      currentStore._setError(err instanceof Error ? err.message : "Failed to connect to video room");
+      currentStore._setError(
+        err instanceof Error ? err.message : "Failed to connect to video room",
+      );
       currentStore._setCallState("preview_ready");
       await this.destroyRoomOnly();
       throw err;
@@ -793,7 +956,8 @@ class CallSessionManager {
     if (
       this.isPublishing &&
       this.publishStartedAt &&
-      Date.now() - this.publishStartedAt > CallSessionManager.PUBLISH_MUTEX_TIMEOUT_MS
+      Date.now() - this.publishStartedAt >
+        CallSessionManager.PUBLISH_MUTEX_TIMEOUT_MS
     ) {
       this.log("publish_mutex_watchdog_triggered", {
         stuckForMs: Date.now() - this.publishStartedAt,
@@ -812,7 +976,10 @@ class CallSessionManager {
     preferredFacingMode?: CameraFacingMode,
     videoDeviceId?: string,
     audioDeviceId?: string,
-    preCreatedTracks?: { videoTrack?: LocalVideoTrack; audioTrack?: LocalAudioTrack }
+    preCreatedTracks?: {
+      videoTrack?: LocalVideoTrack;
+      audioTrack?: LocalAudioTrack;
+    },
   ): Promise<void> {
     if (this.mediaPolicy === "none" || this.mediaPolicy === "restricted") {
       this.log("publish_blocked_by_media_policy", { policy: this.mediaPolicy });
@@ -870,25 +1037,36 @@ class CallSessionManager {
       if (audio) {
         let micTrack = preCreatedTracks?.audioTrack;
         if (micTrack) {
-          const isUsable = micTrack.mediaStreamTrack.readyState === "live" && 
-                           !micTrack.mediaStreamTrack.muted &&
-                           (!this.audioDeviceId || micTrack.mediaStreamTrack.getSettings().deviceId === this.audioDeviceId);
+          const isUsable =
+            micTrack.mediaStreamTrack.readyState === "live" &&
+            !micTrack.mediaStreamTrack.muted &&
+            (!this.audioDeviceId ||
+              micTrack.mediaStreamTrack.getSettings().deviceId ===
+                this.audioDeviceId);
           if (!isUsable) {
             this.log("precreated_audio_track_dead_recreating");
             try {
-              micTrack = await createLocalAudioTrack({ ...LIVEKIT_AUDIO_CAPTURE_OPTIONS, deviceId: this.audioDeviceId });
+              micTrack = await createLocalAudioTrack({
+                ...LIVEKIT_AUDIO_CAPTURE_OPTIONS,
+                deviceId: this.audioDeviceId,
+              });
             } catch (err) {
               this.log("recreate_audio_failed", { error: String(err) });
             }
           }
         } else {
-          micTrack = await createLocalAudioTrack({ ...LIVEKIT_AUDIO_CAPTURE_OPTIONS, deviceId: this.audioDeviceId });
+          micTrack = await createLocalAudioTrack({
+            ...LIVEKIT_AUDIO_CAPTURE_OPTIONS,
+            deviceId: this.audioDeviceId,
+          });
         }
 
         if (this.isDestroyed || this.room !== roomRef) return;
 
         // Atomic replace: unpublish & stop stale micro track first to avoid leaks
-        const existingMicPub = roomRef.localParticipant.getTrackPublication(Track.Source.Microphone);
+        const existingMicPub = roomRef.localParticipant.getTrackPublication(
+          Track.Source.Microphone,
+        );
         if (existingMicPub?.track) {
           this.log("unpublishing_existing_mic_before_republish");
           try {
@@ -906,7 +1084,7 @@ class CallSessionManager {
           publishedTracks.push(micTrack);
           this.audioDeviceId = micTrack.mediaStreamTrack.getSettings().deviceId;
           this.log("publish_audio_success", { deviceId: this.audioDeviceId });
-          
+
           micTrack.mediaStreamTrack.onended = () => {
             this.log("audio_track_ended_watchdog_triggered");
             if (this.room === roomRef) {
@@ -922,24 +1100,44 @@ class CallSessionManager {
       if (video) {
         const createTrackWithFallback = async (): Promise<LocalVideoTrack> => {
           try {
-            this.log("track_recreate_attempt", { deviceId: this.videoDeviceId, facingMode: this.facingMode });
+            this.log("track_recreate_attempt", {
+              deviceId: this.videoDeviceId,
+              facingMode: this.facingMode,
+            });
             const track = await createLocalVideoTrack({
               deviceId: this.videoDeviceId,
               facingMode: this.facingMode || "user",
             });
-            logEvent("track_recreated", { deviceId: this.videoDeviceId, facingMode: this.facingMode || "user", success: true });
+            logEvent("track_recreated", {
+              deviceId: this.videoDeviceId,
+              facingMode: this.facingMode || "user",
+              success: true,
+            });
             return track;
           } catch (err) {
-            this.log("track_recreate_with_device_id_failed_falling_back_to_facing_mode", { error: String(err) });
+            this.log(
+              "track_recreate_with_device_id_failed_falling_back_to_facing_mode",
+              { error: String(err) },
+            );
             try {
               const fallbackTrack = await createLocalVideoTrack({
                 facingMode: "user",
               });
-              logEvent("track_recreated", { deviceId: "none", facingMode: "user", success: true, fallback: true });
+              logEvent("track_recreated", {
+                deviceId: "none",
+                facingMode: "user",
+                success: true,
+                fallback: true,
+              });
               return fallbackTrack;
             } catch (fallbackErr) {
-              this.log("track_recreate_fallback_failed", { error: String(fallbackErr) });
-              logEvent("track_recreated", { success: false, error: String(fallbackErr) });
+              this.log("track_recreate_fallback_failed", {
+                error: String(fallbackErr),
+              });
+              logEvent("track_recreated", {
+                success: false,
+                error: String(fallbackErr),
+              });
               throw fallbackErr;
             }
           }
@@ -947,9 +1145,12 @@ class CallSessionManager {
 
         let camTrack = preCreatedTracks?.videoTrack;
         if (camTrack) {
-          const isUsable = camTrack.mediaStreamTrack.readyState === "live" && 
-                           !camTrack.mediaStreamTrack.muted &&
-                           (!this.videoDeviceId || camTrack.mediaStreamTrack.getSettings().deviceId === this.videoDeviceId);
+          const isUsable =
+            camTrack.mediaStreamTrack.readyState === "live" &&
+            !camTrack.mediaStreamTrack.muted &&
+            (!this.videoDeviceId ||
+              camTrack.mediaStreamTrack.getSettings().deviceId ===
+                this.videoDeviceId);
           if (!isUsable) {
             this.log("precreated_video_track_dead_recreating");
             try {
@@ -969,7 +1170,9 @@ class CallSessionManager {
         if (this.isDestroyed || this.room !== roomRef) return;
 
         // Atomic replace: unpublish & stop stale camera track first to avoid leaks
-        const existingCamPub = roomRef.localParticipant.getTrackPublication(Track.Source.Camera);
+        const existingCamPub = roomRef.localParticipant.getTrackPublication(
+          Track.Source.Camera,
+        );
         if (existingCamPub?.track) {
           this.log("unpublishing_existing_camera_before_republish");
           try {
@@ -987,7 +1190,7 @@ class CallSessionManager {
           publishedTracks.push(camTrack);
           this.videoDeviceId = camTrack.mediaStreamTrack.getSettings().deviceId;
           this.log("publish_video_success", { deviceId: this.videoDeviceId });
-          
+
           camTrack.mediaStreamTrack.onended = () => {
             this.log("camera_track_ended_watchdog_triggered");
             if (this.room === roomRef) {
@@ -1015,7 +1218,9 @@ class CallSessionManager {
         }
       }
       this.setCallState("ended");
-      store._setError(err instanceof Error ? err.message : "Failed to publish tracks");
+      store._setError(
+        err instanceof Error ? err.message : "Failed to publish tracks",
+      );
       throw err;
     } finally {
       this.isPublishing = false;
@@ -1028,9 +1233,13 @@ class CallSessionManager {
     if (!this.room) return;
     const roomRef = this.room;
     this.log("unpublishing_all_tracks_media_policy");
-    const camPub = roomRef.localParticipant.getTrackPublication(Track.Source.Camera);
-    const micPub = roomRef.localParticipant.getTrackPublication(Track.Source.Microphone);
-    
+    const camPub = roomRef.localParticipant.getTrackPublication(
+      Track.Source.Camera,
+    );
+    const micPub = roomRef.localParticipant.getTrackPublication(
+      Track.Source.Microphone,
+    );
+
     if (camPub) {
       const track = camPub.track;
       if (track) {
@@ -1045,7 +1254,7 @@ class CallSessionManager {
         }
       }
     }
-    
+
     if (micPub) {
       const track = micPub.track;
       if (track) {
@@ -1085,29 +1294,35 @@ class CallSessionManager {
       this.connectStartedAt !== null &&
       Date.now() - this.connectStartedAt > 15000;
 
-    const hasActiveMedia = Array.from(this.room?.remoteParticipants.values() || [])
-      .some((p) => p.getTrackPublications().some((pub) => pub.isSubscribed && pub.track));
+    const hasActiveMedia = Array.from(
+      this.room?.remoteParticipants.values() || [],
+    ).some((p) =>
+      p.getTrackPublications().some((pub) => pub.isSubscribed && pub.track),
+    );
 
     const isPeerConnectionAlive =
-      (this.room as any)?.engine?.pcManager?.publisher?.connectionState === "connected";
+      (this.room as any)?.engine?.pcManager?.publisher?.connectionState ===
+      "connected";
 
-    const forceRecovery = isNoProgress && !hasActiveMedia && !isPeerConnectionAlive;
+    const forceRecovery =
+      isNoProgress && !hasActiveMedia && !isPeerConnectionAlive;
 
     // Strict recovery filters
     if (forceRecovery) {
       this.log("forcing_recovery_from_stuck_connecting");
     }
 
-    if (!forceRecovery && (
-      this.isPublishing ||
-      this.connectPromise ||
-      (this.room && this.room.state !== RoomConnectionState.Disconnected)
-    )) {
+    if (
+      !forceRecovery &&
+      (this.isPublishing ||
+        this.connectPromise ||
+        (this.room && this.room.state !== RoomConnectionState.Disconnected))
+    ) {
       this.log("recovery_skipped_active_session", {
         reason,
         isPublishing: this.isPublishing,
         hasConnectPromise: !!this.connectPromise,
-        roomState: this.room?.state
+        roomState: this.room?.state,
       });
       return;
     }
@@ -1127,8 +1342,16 @@ class CallSessionManager {
 
     // Proactive status check: stop recovery if backend indicates call has ended (Server-Authoritative Gate)
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
-    const prefix = this.role === "public" ? "public" : this.role === "patient" ? "patient" : "doctor";
-    const statusUrl = buildUrl(baseUrl, `/${prefix}/appointments/${this.appointmentId}`);
+    const prefix =
+      this.role === "public"
+        ? "public"
+        : this.role === "patient"
+          ? "patient"
+          : "doctor";
+    const statusUrl = buildUrl(
+      baseUrl,
+      `/${prefix}/appointments/${this.appointmentId}`,
+    );
     try {
       const statusRes = await fetch(statusUrl, { credentials: "include" });
       this.checkTerminated();
@@ -1151,7 +1374,9 @@ class CallSessionManager {
     } else if (Date.now() - this.recoveryStartedAt > 5 * 60 * 1000) {
       this.log("recovery_circuit_breaker");
       this.setCallState("ended");
-      store._setError("Unable to restore connection. Please try rejoining later.");
+      store._setError(
+        "Unable to restore connection. Please try rejoining later.",
+      );
       await this.destroy();
       return;
     }
@@ -1161,16 +1386,22 @@ class CallSessionManager {
 
     // Capture currently active device IDs
     if (this.room) {
-      const activeVideoTrack = this.room.localParticipant.getTrackPublication(Track.Source.Camera)?.track;
+      const activeVideoTrack = this.room.localParticipant.getTrackPublication(
+        Track.Source.Camera,
+      )?.track;
       if (activeVideoTrack) {
-        const activeVideoId = activeVideoTrack.mediaStreamTrack.getSettings().deviceId;
+        const activeVideoId =
+          activeVideoTrack.mediaStreamTrack.getSettings().deviceId;
         if (activeVideoId) {
           this.videoDeviceId = activeVideoId;
         }
       }
-      const activeAudioTrack = this.room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track;
+      const activeAudioTrack = this.room.localParticipant.getTrackPublication(
+        Track.Source.Microphone,
+      )?.track;
       if (activeAudioTrack) {
-        const activeAudioId = activeAudioTrack.mediaStreamTrack.getSettings().deviceId;
+        const activeAudioId =
+          activeAudioTrack.mediaStreamTrack.getSettings().deviceId;
         if (activeAudioId) {
           this.audioDeviceId = activeAudioId;
         }
@@ -1195,7 +1426,8 @@ class CallSessionManager {
           return;
         }
         try {
-          const delay = Math.min(1000 * 2 ** attempt, 10000) + Math.random() * 500;
+          const delay =
+            Math.min(1000 * 2 ** attempt, 10000) + Math.random() * 500;
           await sleep(delay);
           if (this.isDestroyed) {
             this.isRecovering = false;
@@ -1210,7 +1442,10 @@ class CallSessionManager {
 
           let newToken: string;
           try {
-            newToken = await this.safeRefreshToken(this.recoveryReason || undefined, currentSignal);
+            newToken = await this.safeRefreshToken(
+              this.recoveryReason || undefined,
+              currentSignal,
+            );
           } finally {
             if (this.tokenAbortController === ctrl) {
               this.tokenAbortController = null;
@@ -1218,7 +1453,11 @@ class CallSessionManager {
           }
 
           if (this.isDestroyed || currentSeq !== this.tokenRefreshSeq) {
-            this.log("recovery_token_stale", { attempt, currentSeq, latestSeq: this.tokenRefreshSeq });
+            this.log("recovery_token_stale", {
+              attempt,
+              currentSeq,
+              latestSeq: this.tokenRefreshSeq,
+            });
             this.isRecovering = false;
             this.recoveryReason = null;
             return;
@@ -1235,7 +1474,7 @@ class CallSessionManager {
             this.appointmentId!,
             this.role!,
             this.tokenRefresher!,
-            currentSeq
+            currentSeq,
           );
           this.checkTerminated();
           if (this.isDestroyed) {
@@ -1262,7 +1501,12 @@ class CallSessionManager {
           connected = true;
           break;
         } catch (err) {
-          if (err instanceof Error && (err.name === "AbortError" || err.name === "CanceledError" || err.message === "canceled")) {
+          if (
+            err instanceof Error &&
+            (err.name === "AbortError" ||
+              err.name === "CanceledError" ||
+              err.message === "canceled")
+          ) {
             this.log("recovery_token_refresh_aborted");
             return;
           }
@@ -1291,7 +1535,9 @@ class CallSessionManager {
       this.log("recovery_max_attempts_reached");
       const store = useCallStore.getState();
       this.setCallState("ended");
-      store._setError("Unable to restore connection. Maximum recovery attempts reached.");
+      store._setError(
+        "Unable to restore connection. Maximum recovery attempts reached.",
+      );
       await this.destroy();
       return;
     }
@@ -1373,7 +1619,27 @@ class CallSessionManager {
   }
 
   async destroy(): Promise<void> {
+    if (this.destroyPromise) return this.destroyPromise;
+    this.destroyPromise = this._destroyInternal();
+    try {
+      await this.destroyPromise;
+    } finally {
+      this.destroyPromise = null;
+    }
+  }
+
+  private async _destroyInternal(): Promise<void> {
     this.isTerminating = true;
+
+    // Gracefully wait for any in-flight connect to abort
+    if (this.connectPromise) {
+      try {
+        await this.connectPromise;
+      } catch {
+        // ignore
+      }
+    }
+
     this.isDestroyed = true;
     this.isRecovering = false;
     this.recoveryReason = null;
@@ -1482,7 +1748,9 @@ class CallSessionManager {
       return;
     }
 
-    this.log("heartbeat_grace_start", { delayMs: CallSessionManager.HEARTBEAT_GRACE_MS });
+    this.log("heartbeat_grace_start", {
+      delayMs: CallSessionManager.HEARTBEAT_GRACE_MS,
+    });
 
     this.heartbeatGraceTimeout = setTimeout(() => {
       this.heartbeatGraceTimeout = null;
@@ -1502,8 +1770,12 @@ class CallSessionManager {
     }
 
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
-    const prefix = role === "public" ? "public" : role === "patient" ? "patient" : "doctor";
-    const url = buildUrl(baseUrl, `/${prefix}/appointments/${appointmentId}/call/heartbeat`);
+    const prefix =
+      role === "public" ? "public" : role === "patient" ? "patient" : "doctor";
+    const url = buildUrl(
+      baseUrl,
+      `/${prefix}/appointments/${appointmentId}/call/heartbeat`,
+    );
 
     this.log("heartbeat_start", { url });
 
@@ -1512,11 +1784,11 @@ class CallSessionManager {
 
     const loop = () => {
       void this.sendHeartbeat(url);
-      
+
       const now = Date.now();
       nextTick += interval;
       if (nextTick < now) nextTick = now + interval; // Drift protection
-      
+
       const delay = Math.max(0, nextTick - now) + Math.random() * 500;
       this.heartbeatTimeout = setTimeout(loop, delay);
     };
@@ -1540,7 +1812,7 @@ class CallSessionManager {
       seq: this.seq,
       token_id: this.tokenId,
       sent_at: Date.now() / 1000,
-      rtt: this.lastRtt
+      rtt: this.lastRtt,
     };
 
     const startTime = Date.now();
@@ -1562,8 +1834,14 @@ class CallSessionManager {
       if (res.ok || res.status === 202) {
         if (this.firstHeartbeatFailureAt !== null) {
           const downtimeMs = performance.now() - this.firstHeartbeatFailureAt;
-          this.log("heartbeat_recovered", { downtimeMs, consecutiveCount: this.heartbeat404Count });
-          logEvent("heartbeat_recovered", { downtimeMs, consecutiveCount: this.heartbeat404Count });
+          this.log("heartbeat_recovered", {
+            downtimeMs,
+            consecutiveCount: this.heartbeat404Count,
+          });
+          logEvent("heartbeat_recovered", {
+            downtimeMs,
+            consecutiveCount: this.heartbeat404Count,
+          });
         }
         this.heartbeat404Count = 0;
         this.firstHeartbeatFailureAt = null;
@@ -1577,7 +1855,10 @@ class CallSessionManager {
             // Monotonic check
             if (typeof data.server_time === "number") {
               if (data.server_time < this.lastServerTime) {
-                this.log("heartbeat_out_of_order_ignored", { serverTime: data.server_time, lastServerTime: this.lastServerTime });
+                this.log("heartbeat_out_of_order_ignored", {
+                  serverTime: data.server_time,
+                  lastServerTime: this.lastServerTime,
+                });
                 return;
               }
               this.lastServerTime = data.server_time;
@@ -1591,18 +1872,28 @@ class CallSessionManager {
             // Media policy check
             if (data.media_policy) {
               this.mediaPolicy = data.media_policy;
-              if (this.mediaPolicy === "none" || this.mediaPolicy === "restricted") {
-                this.log("heartbeat_media_restricted", { policy: this.mediaPolicy });
+              if (
+                this.mediaPolicy === "none" ||
+                this.mediaPolicy === "restricted"
+              ) {
+                this.log("heartbeat_media_restricted", {
+                  policy: this.mediaPolicy,
+                });
                 void this.unpublishAllTracks();
               }
             }
 
             // Handle control plane terminate instruction (e.g. fenced out, or call ended)
             if (data.terminate === true || data.status === "terminated") {
-              if (data.reason === "lost_ownership" || data.reason === "stale_epoch") {
+              if (
+                data.reason === "lost_ownership" ||
+                data.reason === "stale_epoch"
+              ) {
                 this.log("heartbeat_lost_ownership", { data });
                 const store = useCallStore.getState();
-                store._setError("Call active in another window (lost ownership)");
+                store._setError(
+                  "Call active in another window (lost ownership)",
+                );
                 notifyError("Session taken over in another tab");
               } else {
                 this.log("heartbeat_terminate_requested", { data });
@@ -1615,7 +1906,10 @@ class CallSessionManager {
 
             // Tab A MUST die instantly if another tab (with higher epoch) has taken ownership
             if (typeof data.epoch === "number" && data.epoch > this.epoch) {
-              this.log("heartbeat_lost_ownership", { serverEpoch: data.epoch, localEpoch: this.epoch });
+              this.log("heartbeat_lost_ownership", {
+                serverEpoch: data.epoch,
+                localEpoch: this.epoch,
+              });
               const store = useCallStore.getState();
               store._setError("Call active in another window (lost ownership)");
               notifyError("Call active in another window (lost ownership)");
@@ -1626,7 +1920,10 @@ class CallSessionManager {
 
             // Ignore smaller epochs
             if (typeof data.epoch === "number" && data.epoch < this.epoch) {
-              this.log("heartbeat_stale_epoch_ignored", { serverEpoch: data.epoch, localEpoch: this.epoch });
+              this.log("heartbeat_stale_epoch_ignored", {
+                serverEpoch: data.epoch,
+                localEpoch: this.epoch,
+              });
               return;
             }
 
@@ -1636,10 +1933,23 @@ class CallSessionManager {
             }
 
             // Handle server call completion
-            if (data.call_status === "ended" || data.call_status === "completed") {
-              const returnedVersion = typeof data.session_version === "number" ? data.session_version : null;
-              if (returnedVersion === null || returnedVersion >= this.sessionVersion) {
-                this.log("heartbeat_server_ended_pending_confirmation", { call_status: data.call_status, returnedVersion, currentVersion: this.sessionVersion });
+            if (
+              data.call_status === "ended" ||
+              data.call_status === "completed"
+            ) {
+              const returnedVersion =
+                typeof data.session_version === "number"
+                  ? data.session_version
+                  : null;
+              if (
+                returnedVersion === null ||
+                returnedVersion >= this.sessionVersion
+              ) {
+                this.log("heartbeat_server_ended_pending_confirmation", {
+                  call_status: data.call_status,
+                  returnedVersion,
+                  currentVersion: this.sessionVersion,
+                });
 
                 await sleep(1000);
                 this.checkTerminated();
@@ -1656,14 +1966,23 @@ class CallSessionManager {
                   if (confirmRes.ok || confirmRes.status === 202) {
                     const confirmData = await confirmRes.json();
                     this.checkTerminated();
-                    if (confirmData && (confirmData.call_status === "ended" || confirmData.call_status === "completed" || confirmData.terminate === true)) {
-                      this.log("heartbeat_terminal_confirmed", { call_status: confirmData.call_status });
+                    if (
+                      confirmData &&
+                      (confirmData.call_status === "ended" ||
+                        confirmData.call_status === "completed" ||
+                        confirmData.terminate === true)
+                    ) {
+                      this.log("heartbeat_terminal_confirmed", {
+                        call_status: confirmData.call_status,
+                      });
                       this.setCallState("ended");
                       void this.destroy();
                     }
                   }
                 } catch (confirmErr) {
-                  this.log("heartbeat_confirmation_failed", { error: String(confirmErr) });
+                  this.log("heartbeat_confirmation_failed", {
+                    error: String(confirmErr),
+                  });
                 }
               }
             }
@@ -1697,7 +2016,9 @@ class CallSessionManager {
           }
         }
       } else if (res.status === 401 || res.status === 403) {
-        this.log("heartbeat_unauthorized_refreshing_token", { status: res.status });
+        this.log("heartbeat_unauthorized_refreshing_token", {
+          status: res.status,
+        });
         try {
           await this.safeRefreshToken("heartbeat_401");
           // Re-queue heartbeat immediately after refresh
@@ -1707,26 +2028,38 @@ class CallSessionManager {
         }
       } else if ([404, 502, 503, 504].includes(res.status)) {
         this.heartbeat404Count++;
-        this.log("heartbeat_failure", { status: res.status, consecutiveCount: this.heartbeat404Count });
+        this.log("heartbeat_failure", {
+          status: res.status,
+          consecutiveCount: this.heartbeat404Count,
+        });
 
         if (!this.firstHeartbeatFailureAt) {
           this.firstHeartbeatFailureAt = performance.now();
         }
 
         const elapsedMs = performance.now() - this.firstHeartbeatFailureAt;
-        const isRoomActive = this.room && this.room.state !== RoomConnectionState.Disconnected;
+        const isRoomActive =
+          this.room && this.room.state !== RoomConnectionState.Disconnected;
 
         if (isRoomActive) {
-          if (elapsedMs >= CallSessionManager.MAX_HEARTBEAT_FAILURE_ROOM_ACTIVE_WINDOW_MS) {
+          if (
+            elapsedMs >=
+            CallSessionManager.MAX_HEARTBEAT_FAILURE_ROOM_ACTIVE_WINDOW_MS
+          ) {
             this.log("heartbeat_failure_zombie_cutoff", { elapsedMs });
             const store = useCallStore.getState();
             this.setCallState("ended");
             store._setError("Server connection lost permanently.");
             void this.destroy();
-          } else if (elapsedMs >= CallSessionManager.MAX_HEARTBEAT_FAILURE_WINDOW_MS) {
+          } else if (
+            elapsedMs >= CallSessionManager.MAX_HEARTBEAT_FAILURE_WINDOW_MS
+          ) {
             if (!this.warnedUnstableHeartbeat) {
               this.log("heartbeat_failure_soft_degraded", { elapsedMs });
-              notifyWarning("Connection unstable", "Heartbeat to server failed. Trying to reconnect...");
+              notifyWarning(
+                "Connection unstable",
+                "Heartbeat to server failed. Trying to reconnect...",
+              );
               this.warnedUnstableHeartbeat = true;
             }
           } else {

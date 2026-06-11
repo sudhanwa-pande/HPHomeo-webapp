@@ -17,20 +17,17 @@ import { cn } from "@/lib/utils";
 import { hapticTap, hapticPulse, hapticWarning } from "@/lib/haptics";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { IsolatedInput } from "@/components/ui/isolated-input";
 import { SectionShell, InfoLabel } from "./shared";
 import { formatDateOnly } from "./utils";
 import { usePrescriptionForm } from "./PrescriptionFormContext";
-import type { DoctorAppointmentDetail, RxItem, PrescriptionTemplate } from "@/types/doctor";
+import type {
+  DoctorAppointmentDetail,
+  RxItem,
+  PrescriptionTemplate,
+} from "@/types/doctor";
 
 export function PrescriptionSection({
   appointment,
@@ -110,7 +107,9 @@ export function PrescriptionSection({
                 </span>
               )}
               {hasUnsavedChanges && autoSaveStatus === "idle" && (
-                <span className="hidden text-xs text-amber-600 sm:inline">Unsaved</span>
+                <span className="hidden text-xs text-amber-600 sm:inline">
+                  Unsaved
+                </span>
               )}
             </div>
 
@@ -176,16 +175,11 @@ export function PrescriptionSection({
             <InfoLabel
               label="Age"
               value={
-                appointment.patient.age
-                  ? String(appointment.patient.age)
-                  : "-"
+                appointment.patient.age ? String(appointment.patient.age) : "-"
               }
             />
             <InfoLabel label="Sex" value={appointment.patient.sex || "-"} />
-            <InfoLabel
-              label="Phone"
-              value={appointment.patient.phone || "-"}
-            />
+            <InfoLabel label="Phone" value={appointment.patient.phone || "-"} />
             <InfoLabel
               label="Date"
               value={formatDateOnly(appointment.scheduled_at)}
@@ -220,9 +214,7 @@ export function PrescriptionSection({
             <AutoResizeTextarea
               rows={5}
               value={payload.diagnosis || ""}
-              onValueChange={(val) =>
-                handleFieldChange("diagnosis", val)
-              }
+              onValueChange={(val) => handleFieldChange("diagnosis", val)}
               onTypingStateChange={(t) => setIsTyping(t)}
               disabled={isFinalized || !canManage}
               placeholder="Clinical diagnosis or impression."
@@ -255,8 +247,12 @@ export function PrescriptionSection({
         <div className="space-y-3.5">
           {payload.items.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/60 bg-brand-bg/10 py-8">
-              <p className="text-sm font-medium text-brand-dark">No medicines added</p>
-              <p className="mt-1 text-xs text-brand-subtext">Add medicines to this prescription</p>
+              <p className="text-sm font-medium text-brand-dark">
+                No medicines added
+              </p>
+              <p className="mt-1 text-xs text-brand-subtext">
+                Add medicines to this prescription
+              </p>
               {!isFinalized && canManage && (
                 <Button
                   variant="outline"
@@ -315,59 +311,46 @@ export function PrescriptionSection({
       </SectionShell>
 
       {/* Template dialogs */}
-      <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
-        <DialogContent className="max-w-md rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>Load Template</DialogTitle>
-            <DialogDescription>
-              Choose a saved prescription template.
-            </DialogDescription>
-          </DialogHeader>
-          {templates.length === 0 ? (
-            <p className="py-6 text-center text-sm text-brand-subtext">
-              No templates saved yet.
-            </p>
-          ) : (
-            <div className="max-h-64 space-y-2 overflow-y-auto">
-              {templates.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => applyTemplate(t)}
-                  className="w-full rounded-xl border border-border/60 px-4 py-3 text-left transition-colors hover:bg-brand-bg"
-                >
-                  <p className="text-sm font-medium text-brand-dark">
-                    {t.name}
-                  </p>
-                  <p className="mt-0.5 text-xs text-brand-subtext">
-                    {t.payload.items?.length ?? 0} medicine
-                    {(t.payload.items?.length ?? 0) !== 1 ? "s" : ""}
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <ResponsiveDialog
+        open={templateDialogOpen}
+        onOpenChange={setTemplateDialogOpen}
+        title="Load Template"
+        description="Choose a saved prescription template."
+        size="md"
+      >
+        {templates.length === 0 ? (
+          <p className="py-6 text-center text-sm text-brand-subtext">
+            No templates saved yet.
+          </p>
+        ) : (
+          <div className="max-h-64 space-y-2 overflow-y-auto">
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => applyTemplate(t)}
+                className="w-full rounded-xl border border-border/60 px-4 py-3 text-left transition-colors hover:bg-brand-bg"
+              >
+                <p className="text-sm font-medium text-brand-dark">{t.name}</p>
+                <p className="mt-0.5 text-xs text-brand-subtext">
+                  {t.payload.items?.length ?? 0} medicine
+                  {(t.payload.items?.length ?? 0) !== 1 ? "s" : ""}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+      </ResponsiveDialog>
 
-      <Dialog
+      <ResponsiveDialog
         open={saveTemplateDialogOpen}
         onOpenChange={setSaveTemplateDialogOpen}
-      >
-        <DialogContent className="max-w-sm rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>Save as Template</DialogTitle>
-            <DialogDescription>
-              Give this prescription a reusable name.
-            </DialogDescription>
-          </DialogHeader>
-          <Input
-            placeholder="Template name"
-            value={templateName}
-            onChange={(e) => setTemplateName(e.target.value)}
-            className="rounded-xl"
-          />
-          <DialogFooter>
+        title="Save as Template"
+        description="Give this prescription a reusable name."
+        size="sm"
+        isDirty={!!templateName.trim()}
+        footer={
+          <>
             <Button
               variant="outline"
               className="rounded-xl"
@@ -382,218 +365,232 @@ export function PrescriptionSection({
             >
               Save Template
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        <Input
+          placeholder="Template name"
+          value={templateName}
+          onChange={(e) => setTemplateName(e.target.value)}
+          className="rounded-xl"
+        />
+      </ResponsiveDialog>
 
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-4xl p-0 overflow-hidden sm:max-h-[90vh]">
-          <DialogHeader className="px-4 py-3 border-b bg-brand-bg/50">
-            <DialogTitle>Prescription Preview</DialogTitle>
-          </DialogHeader>
-          {previewBlobUrl && (
-            <iframe src={previewBlobUrl} className="w-full h-[75vh]" />
-          )}
-          <DialogFooter className="px-4 py-3 border-t bg-brand-bg/50 sm:justify-end">
-            <Button onClick={() => setPreviewOpen(false)} variant="outline">
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ResponsiveDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title="Prescription Preview"
+        size="xl"
+        footer={
+          <Button onClick={() => setPreviewOpen(false)} variant="outline">
+            Close
+          </Button>
+        }
+      >
+        {previewBlobUrl && (
+          <iframe src={previewBlobUrl} className="w-full h-[75vh]" />
+        )}
+      </ResponsiveDialog>
     </div>
   );
 }
 
-const MedicineCard = React.memo(function MedicineCard({
-  item,
-  index,
-  disabled,
-  onUpdate,
-  onDuplicate,
-  onRemove,
-}: {
-  item: RxItem;
-  index: number;
-  disabled: boolean;
-  onUpdate: (index: number, field: keyof RxItem, value: string) => void;
-  onDuplicate: (index: number) => void;
-  onRemove: (index: number) => void;
-}) {
-  const [expanded, setExpanded] = useState(!item.name);
-  const hasName = item.name.trim().length > 0;
-  const summary = [item.dosage, item.frequency, item.duration]
-    .filter(Boolean)
-    .join(" · ");
+const MedicineCard = React.memo(
+  function MedicineCard({
+    item,
+    index,
+    disabled,
+    onUpdate,
+    onDuplicate,
+    onRemove,
+  }: {
+    item: RxItem;
+    index: number;
+    disabled: boolean;
+    onUpdate: (index: number, field: keyof RxItem, value: string) => void;
+    onDuplicate: (index: number) => void;
+    onRemove: (index: number) => void;
+  }) {
+    const [expanded, setExpanded] = useState(!item.name);
+    const hasName = item.name.trim().length > 0;
+    const summary = [item.dosage, item.frequency, item.duration]
+      .filter(Boolean)
+      .join(" · ");
 
-  return (
-    <div
-      className={cn(
-        "rounded-xl border transition-colors",
-        expanded
-          ? "border-brand/20 bg-white shadow-sm"
-          : "border-border/60 bg-brand-bg/20 hover:border-brand/15",
-      )}
-    >
+    return (
       <div
-        role="button"
-        tabIndex={0}
-        onClick={() => {
-          hapticTap();
-          setExpanded(!expanded);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setExpanded(!expanded);
-          }
-        }}
-        className="flex w-full cursor-pointer items-center gap-3 px-3 py-4 text-left sm:px-4"
+        className={cn(
+          "rounded-xl border transition-colors",
+          expanded
+            ? "border-brand/20 bg-white shadow-sm"
+            : "border-border/60 bg-brand-bg/20 hover:border-brand/15",
+        )}
       >
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-[11px] font-bold text-brand">
-          {index + 1}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p
-            className={cn(
-              "truncate text-sm font-semibold",
-              hasName ? "text-brand-dark" : "text-brand-subtext/70",
-            )}
-          >
-            {hasName ? item.name : "New Medicine"}
-          </p>
-          {summary && !expanded && (
-            <p className="mt-0.5 truncate text-[11px] text-brand-subtext">{summary}</p>
-          )}
-        </div>
-        {!disabled && (
-          <div className="flex items-center gap-1.5 sm:gap-1">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                hapticPulse();
-                onDuplicate(index);
-              }}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-bg/50 text-brand-subtext/70 transition-colors active:scale-90 hover:bg-brand-bg hover:text-brand-dark sm:h-8 sm:w-8"
-              title="Duplicate"
-            >
-              <Copy className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                hapticWarning();
-                onRemove(index);
-              }}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-50/50 text-red-400 transition-colors active:scale-90 hover:bg-red-50 hover:text-red-600 sm:h-8 sm:w-8"
-              title="Remove"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            hapticTap();
+            setExpanded(!expanded);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setExpanded(!expanded);
+            }
+          }}
+          className="flex w-full cursor-pointer items-center gap-3 px-3 py-4 text-left sm:px-4"
+        >
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-[11px] font-bold text-brand">
+            {index + 1}
           </div>
-        )}
-        <div className="ml-1 shrink-0">
-          {expanded ? (
-            <ChevronUp className="h-4 w-4 text-brand-subtext/40" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-brand-subtext/40" />
-          )}
-        </div>
-      </div>
-
-      {/* Expanded fields */}
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="overflow-hidden"
-          >
-            <div className="border-t border-border/40 px-3 pb-4 pt-4 sm:px-4">
-              {/* Medicine name + dosage — paired together */}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
-                    Medicine name
-                  </label>
-                  <IsolatedInput
-                    value={item.name}
-                    onValueChange={(val) => onUpdate(index, "name", val)}
-                    disabled={disabled}
-                    placeholder="e.g. Paracetamol"
-                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
-                    Dosage
-                  </label>
-                  <IsolatedInput
-                    value={item.dosage || ""}
-                    onValueChange={(val) => onUpdate(index, "dosage", val)}
-                    disabled={disabled}
-                    placeholder="e.g. 500mg"
-                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                  />
-                </div>
-              </div>
-              {/* Frequency + Duration — paired together */}
-              <div className="mt-4 grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
-                    Frequency
-                  </label>
-                  <IsolatedInput
-                    value={item.frequency || ""}
-                    onValueChange={(val) => onUpdate(index, "frequency", val)}
-                    disabled={disabled}
-                    placeholder="e.g. 1-0-1"
-                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
-                    Duration
-                  </label>
-                  <IsolatedInput
-                    value={item.duration || ""}
-                    onValueChange={(val) => onUpdate(index, "duration", val)}
-                    disabled={disabled}
-                    placeholder="e.g. 5 days"
-                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                  />
-                </div>
-              </div>
-              {/* Instructions — full width */}
-              <div className="mt-4">
-                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
-                  Instructions
-                </label>
-                <IsolatedInput
-                  value={item.instructions || ""}
-                  onValueChange={(val) => onUpdate(index, "instructions", val)}
-                  disabled={disabled}
-                  placeholder="e.g. After food"
-                  className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
-                />
-              </div>
+          <div className="min-w-0 flex-1">
+            <p
+              className={cn(
+                "truncate text-sm font-semibold",
+                hasName ? "text-brand-dark" : "text-brand-subtext/70",
+              )}
+            >
+              {hasName ? item.name : "New Medicine"}
+            </p>
+            {summary && !expanded && (
+              <p className="mt-0.5 truncate text-[11px] text-brand-subtext">
+                {summary}
+              </p>
+            )}
+          </div>
+          {!disabled && (
+            <div className="flex items-center gap-1.5 sm:gap-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  hapticPulse();
+                  onDuplicate(index);
+                }}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-bg/50 text-brand-subtext/70 transition-colors active:scale-90 hover:bg-brand-bg hover:text-brand-dark sm:h-8 sm:w-8"
+                title="Duplicate"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  hapticWarning();
+                  onRemove(index);
+                }}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-50/50 text-red-400 transition-colors active:scale-90 hover:bg-red-50 hover:text-red-600 sm:h-8 sm:w-8"
+                title="Remove"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}, (prevProps, nextProps) => {
-  return (
-    prevProps.item === nextProps.item &&
-    prevProps.index === nextProps.index &&
-    prevProps.disabled === nextProps.disabled
-  );
-});
+          )}
+          <div className="ml-1 shrink-0">
+            {expanded ? (
+              <ChevronUp className="h-4 w-4 text-brand-subtext/40" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-brand-subtext/40" />
+            )}
+          </div>
+        </div>
+
+        {/* Expanded fields */}
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden"
+            >
+              <div className="border-t border-border/40 px-3 pb-4 pt-4 sm:px-4">
+                {/* Medicine name + dosage — paired together */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
+                      Medicine name
+                    </label>
+                    <IsolatedInput
+                      value={item.name}
+                      onValueChange={(val) => onUpdate(index, "name", val)}
+                      disabled={disabled}
+                      placeholder="e.g. Paracetamol"
+                      className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
+                      Dosage
+                    </label>
+                    <IsolatedInput
+                      value={item.dosage || ""}
+                      onValueChange={(val) => onUpdate(index, "dosage", val)}
+                      disabled={disabled}
+                      placeholder="e.g. 500mg"
+                      className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
+                    />
+                  </div>
+                </div>
+                {/* Frequency + Duration — paired together */}
+                <div className="mt-4 grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
+                      Frequency
+                    </label>
+                    <IsolatedInput
+                      value={item.frequency || ""}
+                      onValueChange={(val) => onUpdate(index, "frequency", val)}
+                      disabled={disabled}
+                      placeholder="e.g. 1-0-1"
+                      className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
+                      Duration
+                    </label>
+                    <IsolatedInput
+                      value={item.duration || ""}
+                      onValueChange={(val) => onUpdate(index, "duration", val)}
+                      disabled={disabled}
+                      placeholder="e.g. 5 days"
+                      className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
+                    />
+                  </div>
+                </div>
+                {/* Instructions — full width */}
+                <div className="mt-4">
+                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-brand-subtext/70">
+                    Instructions
+                  </label>
+                  <IsolatedInput
+                    value={item.instructions || ""}
+                    onValueChange={(val) =>
+                      onUpdate(index, "instructions", val)
+                    }
+                    disabled={disabled}
+                    placeholder="e.g. After food"
+                    className="h-11 rounded-xl scroll-mt-32 sm:h-10 sm:rounded-lg"
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.item === nextProps.item &&
+      prevProps.index === nextProps.index &&
+      prevProps.disabled === nextProps.disabled
+    );
+  },
+);
 
 function TemplateDropdown({
   templates,

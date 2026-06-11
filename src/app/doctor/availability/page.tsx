@@ -27,19 +27,15 @@ import {
   SectionCard,
   SkeletonChartCard,
 } from "@/components/doctor/ui";
-import { WeeklyTimeline, MobileDayView } from "@/components/doctor/availability/weekly-timeline";
+import {
+  WeeklyTimeline,
+  MobileDayView,
+} from "@/components/doctor/availability/weekly-timeline";
 import { HeatmapCalendar } from "@/components/doctor/availability/heatmap-calendar";
 import { FloatingSaveBar } from "@/components/doctor/availability/floating-save-bar";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -116,21 +112,21 @@ function totalMinutes(slots: TimeRange[]): number {
   return slots.reduce((sum, s) => {
     const [sh, sm] = s.start.split(":").map(Number);
     const [eh, em] = s.end.split(":").map(Number);
-    return sum + Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+    return sum + Math.max(0, eh * 60 + em - (sh * 60 + sm));
   }, 0);
 }
 
 function minTime(slots: TimeRange[]) {
   return slots.reduce(
     (min, slot) => (slot.start < min ? slot.start : min),
-    slots[0]?.start ?? ""
+    slots[0]?.start ?? "",
   );
 }
 
 function maxTime(slots: TimeRange[]) {
   return slots.reduce(
     (max, slot) => (slot.end > max ? slot.end : max),
-    slots[0]?.end ?? ""
+    slots[0]?.end ?? "",
   );
 }
 
@@ -140,17 +136,17 @@ function normalizeWeeklySchedule(weekly: WeeklySchedule): WeeklySchedule {
       acc[key] = [...weekly[key]].sort((a, b) =>
         a.start === b.start
           ? a.end.localeCompare(b.end)
-          : a.start.localeCompare(b.start)
+          : a.start.localeCompare(b.start),
       );
       return acc;
     },
-    { ...EMPTY_WEEKLY }
+    { ...EMPTY_WEEKLY },
   );
 }
 
 function isSameConfig(
   current: DoctorAvailability | null | undefined,
-  next: { weekly: WeeklySchedule; slotDuration: number; timezone: string }
+  next: { weekly: WeeklySchedule; slotDuration: number; timezone: string },
 ) {
   if (!current) return false;
   return (
@@ -179,7 +175,9 @@ function AvailabilityContent() {
   const isOnboarding = searchParams.get("onboarding") === "1";
   // Capture in a ref so mutation onSuccess closure always sees the current value
   const isOnboardingRef = useRef(isOnboarding);
-  useEffect(() => { isOnboardingRef.current = isOnboarding; }, [isOnboarding]);
+  useEffect(() => {
+    isOnboardingRef.current = isOnboarding;
+  }, [isOnboarding]);
 
   /* ── Local editing state ── */
   const [weekly, setWeekly] = useState<WeeklySchedule>(EMPTY_WEEKLY);
@@ -189,7 +187,7 @@ function AvailabilityContent() {
   /* ── Exception form state ── */
   const [exceptionOpen, setExceptionOpen] = useState(false);
   const [exceptionDate, setExceptionDate] = useState<Date | undefined>(
-    new Date()
+    new Date(),
   );
   const [exceptionStatus, setExceptionStatus] = useState<
     "blocked" | "available"
@@ -200,7 +198,11 @@ function AvailabilityContent() {
   const [conflictState, setConflictState] = useState<ConflictState>(null);
 
   /* ── Queries ── */
-  const { data: availability, isLoading, dataUpdatedAt } = useQuery({
+  const {
+    data: availability,
+    isLoading,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ["doctor-availability"],
     queryFn: async () => {
       try {
@@ -221,7 +223,7 @@ function AvailabilityContent() {
       const until = format(addDays(new Date(), 90), "yyyy-MM-dd");
       const { data } = await api.get<AvailabilityException[]>(
         "/doctor/availability/exception",
-        { params: { from: today, to: until } }
+        { params: { from: today, to: until } },
       );
       return data;
     },
@@ -233,13 +235,15 @@ function AvailabilityContent() {
   useEffect(() => {
     if (dataUpdatedAt && dataUpdatedAt !== lastSyncedAt.current) {
       lastSyncedAt.current = dataUpdatedAt;
-      if (availability) {
-        setWeekly({ ...EMPTY_WEEKLY, ...availability.weekly });
-        setSlotDuration(availability.slot_duration_min);
-      } else {
-        setWeekly(EMPTY_WEEKLY);
-        setSlotDuration(20);
-      }
+      setTimeout(() => {
+        if (availability) {
+          setWeekly({ ...EMPTY_WEEKLY, ...availability.weekly });
+          setSlotDuration(availability.slot_duration_min);
+        } else {
+          setWeekly(EMPTY_WEEKLY);
+          setSlotDuration(20);
+        }
+      }, 0);
     }
   }, [dataUpdatedAt, availability]);
 
@@ -256,16 +260,16 @@ function AvailabilityContent() {
 
   const weeklyMinutes = useMemo(
     () => DAYS.reduce((sum, d) => sum + totalMinutes(weekly[d.key]), 0),
-    [weekly]
+    [weekly],
   );
   const weeklyHours = Math.round((weeklyMinutes / 60) * 10) / 10;
 
   const upcomingExceptions = useMemo(
     () =>
       exceptions.filter(
-        (e) => !isBefore(parseISO(e.date), startOfDay(new Date()))
+        (e) => !isBefore(parseISO(e.date), startOfDay(new Date())),
       ),
-    [exceptions]
+    [exceptions],
   );
 
   /* ── Mutations ── */
@@ -285,16 +289,26 @@ function AvailabilityContent() {
     },
     onSuccess: () => {
       if (isOnboardingRef.current) {
-        notifySuccess("Setup complete!", "Your profile is now pending admin verification.");
+        notifySuccess(
+          "Setup complete!",
+          "Your profile is now pending admin verification.",
+        );
         queryClient.invalidateQueries({ queryKey: ["doctor-availability"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
         setConflictState(null);
         router.push("/doctor/profile");
       } else {
-        notifySuccess("Availability updated", "Your schedule changes are now live.");
+        notifySuccess(
+          "Availability updated",
+          "Your schedule changes are now live.",
+        );
         setConflictState(null);
         queryClient.invalidateQueries({ queryKey: ["doctor-availability"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
       }
     },
     onError: (err) => notifyApiError(err, "Couldn't save availability"),
@@ -326,7 +340,10 @@ function AvailabilityContent() {
     mutationFn: async (id: string) =>
       api.delete(`/doctor/availability/exception/${id}`),
     onSuccess: () => {
-      notifySuccess("Exception removed", "Date is back to normal availability.");
+      notifySuccess(
+        "Exception removed",
+        "Date is back to normal availability.",
+      );
       queryClient.invalidateQueries({ queryKey: ["doctor-exceptions"] });
     },
     onError: (err) => notifyApiError(err, "Couldn't remove exception"),
@@ -347,11 +364,14 @@ function AvailabilityContent() {
         return;
       }
       if (availability) {
-        const { data } = await api.post("/doctor/availability/conflicts-preview", {
-          weekly,
-          slot_duration_min: slotDuration,
-          timezone,
-        });
+        const { data } = await api.post(
+          "/doctor/availability/conflicts-preview",
+          {
+            weekly,
+            slot_duration_min: slotDuration,
+            timezone,
+          },
+        );
         if (data.count > 0) {
           setConflictState({
             type: "availability",
@@ -406,21 +426,21 @@ function AvailabilityContent() {
     }
   }
 
-  const openExceptionForDate = useCallback(
-    (date: Date) => {
-      setExceptionDate(date);
-      setExceptionStatus("blocked");
-      setExceptionReason("");
-      setExceptionSlots([]);
-      setExceptionOpen(true);
-    },
-    []
-  );
+  const openExceptionForDate = useCallback((date: Date) => {
+    setExceptionDate(date);
+    setExceptionStatus("blocked");
+    setExceptionReason("");
+    setExceptionSlots([]);
+    setExceptionOpen(true);
+  }, []);
 
   /* ────────────────────────────── render ────────────────────────────── */
 
   return (
-    <DoctorShell title="Availability" subtitle="Set your weekly schedule so patients can book with you">
+    <DoctorShell
+      title="Availability"
+      subtitle="Set your weekly schedule so patients can book with you"
+    >
       {isLoading ? (
         <div className="space-y-6">
           <SkeletonChartCard />
@@ -447,7 +467,9 @@ function AvailabilityContent() {
                         <CheckCircle2 className="h-4 w-4 text-white" />
                       </div>
                       <div className="hidden sm:block">
-                        <p className="text-xs font-semibold text-brand">Profile Setup</p>
+                        <p className="text-xs font-semibold text-brand">
+                          Profile Setup
+                        </p>
                         <p className="text-[10px] text-brand/60">Complete</p>
                       </div>
                     </div>
@@ -458,7 +480,11 @@ function AvailabilityContent() {
                         className="h-full bg-brand/60"
                         initial={{ scaleX: 0 }}
                         animate={{ scaleX: 1 }}
-                        transition={{ delay: 0.3, duration: 0.5, ease: "easeOut" }}
+                        transition={{
+                          delay: 0.3,
+                          duration: 0.5,
+                          ease: "easeOut",
+                        }}
                         style={{ originX: 0 }}
                       />
                     </div>
@@ -468,14 +494,24 @@ function AvailabilityContent() {
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-brand bg-white shadow-[0_0_0_4px_rgba(59,130,246,0.1)]">
                         <motion.div
                           animate={{ scale: [1, 1.15, 1] }}
-                          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                          transition={{
+                            duration: 2,
+                            repeat: Infinity,
+                            ease: "easeInOut",
+                          }}
                         >
-                          <span className="text-xs font-bold text-brand">2</span>
+                          <span className="text-xs font-bold text-brand">
+                            2
+                          </span>
                         </motion.div>
                       </div>
                       <div>
-                        <p className="text-xs font-semibold text-slate-900">Availability Setup</p>
-                        <p className="text-[10px] text-slate-500">In progress</p>
+                        <p className="text-xs font-semibold text-slate-900">
+                          Availability Setup
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          In progress
+                        </p>
                       </div>
                     </div>
 
@@ -488,7 +524,9 @@ function AvailabilityContent() {
                         <User className="h-3.5 w-3.5 text-slate-300" />
                       </div>
                       <div>
-                        <p className="text-xs font-semibold text-slate-400">Go Live</p>
+                        <p className="text-xs font-semibold text-slate-400">
+                          Go Live
+                        </p>
                         <p className="text-[10px] text-slate-300">Pending</p>
                       </div>
                     </div>
@@ -512,7 +550,11 @@ function AvailabilityContent() {
                     className="h-full bg-gradient-to-r from-brand to-brand/60"
                     initial={{ width: "50%" }}
                     animate={{ width: "75%" }}
-                    transition={{ delay: 0.5, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                    transition={{
+                      delay: 0.5,
+                      duration: 0.8,
+                      ease: [0.22, 1, 0.36, 1],
+                    }}
                   />
                 </div>
               </motion.div>
@@ -538,7 +580,7 @@ function AvailabilityContent() {
                           "rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-all",
                           slotDuration === d
                             ? "bg-brand text-white shadow-sm shadow-brand/20"
-                            : "text-brand-subtext hover:text-brand-dark hover:bg-brand-bg/60"
+                            : "text-brand-subtext hover:text-brand-dark hover:bg-brand-bg/60",
                         )}
                       >
                         {d}m
@@ -617,7 +659,8 @@ function AvailabilityContent() {
                     <p className="mt-0.5 text-xs text-brand-subtext">
                       {activeDaysCount > 0 ? (
                         <>
-                          {activeDaysCount} active day{activeDaysCount !== 1 && "s"}
+                          {activeDaysCount} active day
+                          {activeDaysCount !== 1 && "s"}
                           {" · "}
                           {weeklyHours}h/week
                           {" · "}
@@ -629,10 +672,7 @@ function AvailabilityContent() {
                     </p>
                   </div>
                 </div>
-                <WeeklyTimeline
-                  weekly={weekly}
-                  onChange={setWeekly}
-                />
+                <WeeklyTimeline weekly={weekly} onChange={setWeekly} />
               </SectionCard>
 
               {/* Sidebar */}
@@ -721,7 +761,7 @@ function AvailabilityContent() {
                   "flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all",
                   exceptionStatus === "blocked"
                     ? "bg-white text-red-500 shadow-sm"
-                    : "text-brand-subtext hover:text-brand-dark"
+                    : "text-brand-subtext hover:text-brand-dark",
                 )}
               >
                 Unavailable
@@ -732,7 +772,7 @@ function AvailabilityContent() {
                   "flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all",
                   exceptionStatus === "available"
                     ? "bg-white text-emerald-600 shadow-sm"
-                    : "text-brand-subtext hover:text-brand-dark"
+                    : "text-brand-subtext hover:text-brand-dark",
                 )}
               >
                 Available override
@@ -778,10 +818,8 @@ function AvailabilityContent() {
                         onChange={(e) =>
                           setExceptionSlots((p) =>
                             p.map((s, i) =>
-                              i === index
-                                ? { ...s, start: e.target.value }
-                                : s
-                            )
+                              i === index ? { ...s, start: e.target.value } : s,
+                            ),
                           )
                         }
                         className="h-9 w-full text-xs sm:h-8 sm:w-[7rem]"
@@ -793,10 +831,8 @@ function AvailabilityContent() {
                         onChange={(e) =>
                           setExceptionSlots((p) =>
                             p.map((s, i) =>
-                              i === index
-                                ? { ...s, end: e.target.value }
-                                : s
-                            )
+                              i === index ? { ...s, end: e.target.value } : s,
+                            ),
                           )
                         }
                         className="h-9 w-full text-xs sm:h-8 sm:w-[7rem]"
@@ -807,7 +843,7 @@ function AvailabilityContent() {
                         className="ml-auto text-brand-subtext/40 hover:bg-red-50 hover:text-red-500"
                         onClick={() =>
                           setExceptionSlots((p) =>
-                            p.filter((_, i) => i !== index)
+                            p.filter((_, i) => i !== index),
                           )
                         }
                       >
@@ -915,7 +951,7 @@ function ExceptionsList({
                           "inline-block h-2 w-2 shrink-0 rounded-full",
                           exc.status === "blocked"
                             ? "bg-red-400"
-                            : "bg-emerald-500"
+                            : "bg-emerald-500",
                         )}
                       />
                       <span className="text-sm font-medium text-brand-dark">
@@ -938,7 +974,8 @@ function ExceptionsList({
                         {exc.reason}
                       </p>
                     )}
-                    {((exc.cancelled ?? 0) > 0 || (exc.rescheduled ?? 0) > 0) && (
+                    {((exc.cancelled ?? 0) > 0 ||
+                      (exc.rescheduled ?? 0) > 0) && (
                       <p className="mt-1 pl-4 text-[11px] text-amber-600">
                         {exc.rescheduled ?? 0} rescheduled ·{" "}
                         {exc.cancelled ?? 0} cancelled
@@ -977,17 +1014,35 @@ function ConflictDialog({
   if (!conflictState) return null;
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            {conflictState.appointments.length} appointment
-            {conflictState.appointments.length === 1 ? "" : "s"} affected
-          </DialogTitle>
-          <DialogDescription>
-            These appointments may be rescheduled or cancelled if you continue.
-          </DialogDescription>
-        </DialogHeader>
+    <ResponsiveDialog
+      open={true}
+      onOpenChange={(open) => !open && onClose()}
+      title={`${conflictState.appointments.length} appointment${conflictState.appointments.length === 1 ? "" : "s"} affected`}
+      description="These appointments may be rescheduled or cancelled if you continue."
+      size="md"
+      footer={
+        <div className="flex gap-2 w-full">
+          <Button
+            variant="outline"
+            className="flex-1 rounded-xl"
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button
+            className="flex-1 bg-amber-500 text-white hover:bg-amber-600 gap-1.5 rounded-xl"
+            onClick={async () => {
+              await onConfirm();
+              onClose();
+            }}
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Confirm changes
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
         <Separator />
         <div className="max-h-[16rem] space-y-2 overflow-y-auto">
           {conflictState.appointments.map((item) => (
@@ -1014,22 +1069,7 @@ function ConflictDialog({
             </div>
           ))}
         </div>
-        <DialogFooter>
-          <Button variant="outline" className="flex-1" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            className="flex-1 bg-amber-500 text-white hover:bg-amber-600"
-            onClick={async () => {
-              await onConfirm();
-              onClose();
-            }}
-          >
-            <AlertTriangle className="h-3.5 w-3.5" />
-            Confirm changes
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDialog>
   );
 }
