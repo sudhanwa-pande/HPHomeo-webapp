@@ -59,7 +59,7 @@ export function DoctorConsultationWorkspace({
     queryFn: async () => {
       const { data } = await api.get<{ appointments: DoctorAppointment[] }>(
         "/doctor/appointments/range",
-        { params: { from: "2020-01-01", to: format(new Date(), "yyyy-MM-dd"), patient_id: patientId, limit: 6 } },
+        { params: { from: "2026-03-01", to: format(new Date(), "yyyy-MM-dd"), patient_id: patientId, limit: 6 } },
       );
       return data.appointments
         .filter((a) => a.appointment_id !== appointmentId)
