@@ -266,9 +266,15 @@ export function ConsultationCallPanel({
       window.removeEventListener("orientationchange", onOrientationChange);
   }, [calculateBounds]);
 
-  // Keyboard detection (hybrid with debounce) & Atomic bounds recalculation
+  // Ref to hold state safely for the memoized debouncer
+  const stateRef = useRef({ isPeeking, calculateBounds, minimized });
   useEffect(() => {
-    if (!minimized || typeof window === "undefined") return;
+    stateRef.current = { isPeeking, calculateBounds, minimized };
+  }, [isPeeking, calculateBounds, minimized]);
+
+  // Keyboard detection (hybrid with stable debounce)
+  useEffect(() => {
+    if (!stateRef.current.minimized || typeof window === "undefined") return;
     const vv = window.visualViewport;
     if (!vv) return;
 
@@ -277,32 +283,33 @@ export function ConsultationCallPanel({
     }
 
     let timeoutId: NodeJS.Timeout;
+    let prevHeight = vv.height;
 
     const onResize = () => {
       if (vv.height > maxVvHeightRef.current) {
         maxVvHeightRef.current = vv.height;
       }
 
+      const currentHeight = vv.height;
+      if (Math.abs(currentHeight - prevHeight) < 10) return;
+      prevHeight = currentHeight;
+
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
-        // Hybrid check: maxVvHeight minus visual viewport safely detects keyboard on iOS Safari
+        const state = stateRef.current;
         const keyboardOpen = maxVvHeightRef.current - vv.height > 150;
-        const willBePeeking = keyboardOpen ? isPeeking : false;
+        const willBePeeking = keyboardOpen ? state.isPeeking : false;
 
         setIsKeyboardOpen(keyboardOpen);
         if (!keyboardOpen) setIsPeeking(false);
 
-        // 1. Update bounds FIRST (atomically batched with state updates)
-        // 2. Framer motion applies dragConstraints
-        // 3. Animation begins to new x/y safely without jumps
         const nextPipWidth = willBePeeking ? 200 : keyboardOpen ? 160 : 180;
-        setBounds(calculateBounds(nextPipWidth));
-      }, 200); // 200ms debounce prevents jitter during Android keyboard animation
+        setBounds(state.calculateBounds(nextPipWidth));
+      }, 150);
     };
 
     vv.addEventListener("resize", onResize);
     vv.addEventListener("scroll", onResize);
-    // Initial bounds sync
     onResize();
 
     return () => {
@@ -310,7 +317,7 @@ export function ConsultationCallPanel({
       vv.removeEventListener("resize", onResize);
       vv.removeEventListener("scroll", onResize);
     };
-  }, [minimized, isPeeking, calculateBounds]);
+  }, []);
 
   // Dimensions
   const pipWidth = isPeeking ? 200 : isKeyboardOpen ? 160 : 180;
@@ -487,172 +494,103 @@ export function ConsultationCallPanel({
           style={{ display: "contents" }}
         >
           <ConnectionObserver />
-          {!minimized ? (
-            isFullScreen ? (
-              <div className="fixed inset-0 z-[100] bg-app-bg">
-                <LiveCallRoom
-                  title={appointment.patient?.full_name ?? "Video consultation"}
-                  subtitle={format(
-                    parseISO(appointment.scheduled_at),
-                    "EEE, dd MMM yyyy - hh:mm a",
-                  )}
-                  remoteLabel={appointment.patient?.full_name ?? "Patient"}
-                  remoteWaitingTitle={
-                    appointment.patient?.full_name
-                      ? `Waiting for ${appointment.patient.full_name}`
-                      : "Waiting for patient"
+
+          <motion.div
+            role="dialog"
+            aria-label="Video call window"
+            drag={minimized}
+            dragControls={dragControls}
+            dragListener={false}
+            dragMomentum={false}
+            dragElastic={0.05}
+            dragConstraints={bounds || undefined}
+            onDragStart={() => {
+              if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+              setIsPeeking(false);
+              interactionState.current = "dragging";
+              setIsDragging(true);
+            }}
+            onDragEnd={(e, info) => {
+              interactionState.current = "idle";
+              setIsDragging(false);
+              lastUserYRef.current = info.point.y;
+              wasInBottomHalfRef.current =
+                info.point.y >
+                (typeof window !== "undefined" ? window.innerHeight / 2 : 500);
+            }}
+            onClick={() => {
+              if (isDragging) return;
+              if (
+                minimized &&
+                (interactionState.current === "idle" ||
+                  interactionState.current === "peeking")
+              ) {
+                handlePeek();
+              }
+            }}
+            initial={false}
+            animate={
+              minimized
+                ? {
+                    width: pipWidth,
+                    opacity: isKeyboardOpen && !isPeeking ? 0.85 : 1,
+                    x:
+                      isKeyboardOpen &&
+                      (lastUserYRef.current === null ||
+                        wasInBottomHalfRef.current)
+                        ? (bounds?.right ?? undefined)
+                        : undefined,
+                    y:
+                      isKeyboardOpen &&
+                      (lastUserYRef.current === null ||
+                        wasInBottomHalfRef.current)
+                        ? (bounds?.top ?? undefined)
+                        : undefined,
+                    scale: isDragging ? 1.02 : 1,
                   }
-                  remoteWaitingDescription="The patient will appear here when they join the consultation room."
-                  onLeave={() => endCallMutation.mutate()}
-                  onBack={() => {
-                    setIsFullScreen(false);
-                    if (onMinimize) onMinimize();
-                  }}
-                  endLabel="Leave consultation"
-                  endLoading={endCallMutation.isPending}
-                  allowScreenShare
-                  allowCameraSwitch
-                  preferredFacingMode={preferredFacingMode}
-                  onFacingModeChange={setPreferredFacingMode}
-                  showWorkspaceLayout={true}
-                  workspaceActiveTab={activeWorkspaceTab}
-                  onWorkspaceTabChange={setActiveWorkspaceTab}
-                  isFullScreenLayout={true}
-                  onToggleFullScreen={() => {
-                    setIsFullScreen(false);
-                    if (onMinimize) onMinimize();
-                  }}
-                  workspaceContent={
-                    <DoctorConsultationWorkspace
-                      appointmentId={appointmentId}
-                      appointment={appointment}
-                      activeTab={activeWorkspaceTab}
-                      onTabChange={setActiveWorkspaceTab}
-                    />
+                : {
+                    width: "100%",
+                    opacity: 1,
+                    x: 0,
+                    y: 0,
+                    scale: 1,
                   }
-                />
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-2xl border border-gray-200/60 bg-app-bg shadow-sm transition-all duration-300 h-[700px] flex flex-col">
-                <LiveCallRoom
-                  title={appointment.patient?.full_name ?? "Video consultation"}
-                  subtitle={format(
-                    parseISO(appointment.scheduled_at),
-                    "EEE, dd MMM yyyy - hh:mm a",
-                  )}
-                  remoteLabel={appointment.patient?.full_name ?? "Patient"}
-                  remoteWaitingTitle={
-                    appointment.patient?.full_name
-                      ? `Waiting for ${appointment.patient.full_name}`
-                      : "Waiting for patient"
+            }
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className={cn(
+              minimized
+                ? "fixed z-[1000] overflow-hidden rounded-2xl border touch-manipulation " +
+                    (isDragging
+                      ? "cursor-grabbing border-brand/40 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)] bg-[#111113]/90 backdrop-blur-md"
+                      : "border-white/10 " +
+                        (isKeyboardOpen && !isPeeking
+                          ? "bg-[#111113]/95 backdrop-blur-none shadow-lg"
+                          : "bg-[#111113]/90 backdrop-blur-md shadow-2xl"))
+                : isFullScreen
+                  ? "fixed inset-0 z-[100] bg-app-bg"
+                  : "relative overflow-hidden rounded-2xl border border-gray-200/60 bg-app-bg shadow-sm transition-all duration-300 h-[700px] flex flex-col",
+            )}
+            style={
+              minimized
+                ? {
+                    top: 0,
+                    left: 0,
+                    x:
+                      bounds?.right ??
+                      (typeof window !== "undefined"
+                        ? window.innerWidth - pipWidth - 16
+                        : 0),
+                    y:
+                      bounds?.top ??
+                      (typeof window !== "undefined" &&
+                      window.innerHeight > window.innerWidth
+                        ? 48
+                        : 16),
                   }
-                  remoteWaitingDescription="The patient will appear here when they join the consultation room."
-                  onLeave={() => endCallMutation.mutate()}
-                  endLabel="End call"
-                  endLoading={endCallMutation.isPending}
-                  allowScreenShare
-                  allowCameraSwitch
-                  preferredFacingMode={preferredFacingMode}
-                  onFacingModeChange={setPreferredFacingMode}
-                  showWorkspaceLayout={true}
-                  workspaceActiveTab={activeWorkspaceTab}
-                  onWorkspaceTabChange={setActiveWorkspaceTab}
-                  className="flex-1 h-full"
-                  isFullScreenLayout={false}
-                  onToggleFullScreen={() => setIsFullScreen(true)}
-                  workspaceContent={
-                    <DoctorConsultationWorkspace
-                      appointmentId={appointmentId}
-                      appointment={appointment}
-                      activeTab={activeWorkspaceTab}
-                      onTabChange={setActiveWorkspaceTab}
-                    />
-                  }
-                />
-              </div>
-            )
-          ) : (
-            <motion.div
-              role="dialog"
-              aria-label="Video call window"
-              drag
-              dragControls={dragControls}
-              dragListener={false}
-              dragMomentum={false}
-              dragElastic={0.05}
-              dragConstraints={bounds || undefined}
-              onDragStart={() => {
-                if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-                setIsPeeking(false);
-                interactionState.current = "dragging";
-                setIsDragging(true);
-              }}
-              onDragEnd={(e, info) => {
-                interactionState.current = "idle";
-                setIsDragging(false);
-                lastUserYRef.current = info.point.y;
-                wasInBottomHalfRef.current =
-                  info.point.y >
-                  (typeof window !== "undefined"
-                    ? window.innerHeight / 2
-                    : 500);
-              }}
-              onClick={() => {
-                if (isDragging) return;
-                if (
-                  interactionState.current === "idle" ||
-                  interactionState.current === "peeking"
-                ) {
-                  handlePeek();
-                }
-              }}
-              initial={false}
-              animate={{
-                width: pipWidth,
-                opacity: isKeyboardOpen && !isPeeking ? 0.85 : 1,
-                x:
-                  isKeyboardOpen &&
-                  (lastUserYRef.current === null || wasInBottomHalfRef.current)
-                    ? (bounds?.right ?? undefined)
-                    : undefined,
-                y:
-                  isKeyboardOpen &&
-                  (lastUserYRef.current === null || wasInBottomHalfRef.current)
-                    ? (bounds?.top ?? undefined)
-                    : undefined,
-                scale: isDragging ? 1.02 : 1,
-              }}
-              transition={{
-                type: "spring",
-                stiffness: 300,
-                damping: 30,
-              }}
-              className={cn(
-                "fixed z-[1000] overflow-hidden rounded-2xl border touch-manipulation",
-                isDragging
-                  ? "cursor-grabbing border-brand/40 ring-2 ring-brand/20 shadow-[0_32px_64px_rgba(0,0,0,0.7)] bg-[#111113]/90 backdrop-blur-md"
-                  : "border-white/10",
-                !isDragging &&
-                  (isKeyboardOpen && !isPeeking
-                    ? "bg-[#111113]/95 backdrop-blur-none shadow-lg"
-                    : "bg-[#111113]/90 backdrop-blur-md shadow-2xl"),
-              )}
-              style={{
-                top: 0,
-                left: 0,
-                x:
-                  bounds?.right ??
-                  (typeof window !== "undefined"
-                    ? window.innerWidth - pipWidth - 16
-                    : 0),
-                y:
-                  bounds?.top ??
-                  (typeof window !== "undefined" &&
-                  window.innerHeight > window.innerWidth
-                    ? 48
-                    : 16),
-              }}
-            >
+                : undefined
+            }
+          >
+            {minimized && (
               <div
                 role="slider"
                 aria-label="Drag to reposition video"
@@ -663,7 +601,7 @@ export function ConsultationCallPanel({
                   dragControls.start(e);
                 }}
                 className={cn(
-                  "absolute inset-x-0 top-0 z-10 flex h-10 touch-none select-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
+                  "absolute inset-x-0 top-0 z-[1001] flex h-10 touch-none select-none items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 transition-opacity duration-300",
                   isDragging || isKeyboardOpen
                     ? "opacity-100"
                     : "opacity-0 hover:opacity-100",
@@ -677,24 +615,59 @@ export function ConsultationCallPanel({
                     hapticTap();
                     if (onMaximize) onMaximize();
                   }}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md hover:bg-white/30 pointer-events-auto"
                 >
                   <Maximize2 className="h-4 w-4" />
                 </button>
               </div>
+            )}
 
-              <CallRoomContent
-                minimized={true}
-                patientName={appointment.patient.full_name}
-                endLabel="End consultation"
-                endLoading={endCallMutation.isPending}
-                onEnd={() => endCallMutation.mutate()}
-                onMaximize={onMaximize}
-                onReconnect={() => void joinCall()}
-                joining={joining}
-              />
-            </motion.div>
-          )}
+            <LiveCallRoom
+              title={appointment.patient?.full_name ?? "Video consultation"}
+              subtitle={format(
+                parseISO(appointment.scheduled_at),
+                "EEE, dd MMM yyyy - hh:mm a",
+              )}
+              remoteLabel={appointment.patient?.full_name ?? "Patient"}
+              remoteWaitingTitle={
+                appointment.patient?.full_name
+                  ? `Waiting for ${appointment.patient.full_name}`
+                  : "Waiting for patient"
+              }
+              remoteWaitingDescription="The patient will appear here when they join the consultation room."
+              onLeave={() => endCallMutation.mutate()}
+              onBack={() => {
+                setIsFullScreen(false);
+                if (onMinimize) onMinimize();
+              }}
+              endLabel="Leave consultation"
+              endLoading={endCallMutation.isPending}
+              allowScreenShare
+              allowCameraSwitch
+              preferredFacingMode={preferredFacingMode}
+              onFacingModeChange={setPreferredFacingMode}
+              showWorkspaceLayout={!minimized}
+              workspaceActiveTab={activeWorkspaceTab}
+              onWorkspaceTabChange={setActiveWorkspaceTab}
+              isFullScreenLayout={isFullScreen}
+              isPiP={minimized}
+              onToggleFullScreen={() => {
+                if (!isFullScreen) setIsFullScreen(true);
+                else {
+                  setIsFullScreen(false);
+                  if (onMinimize) onMinimize();
+                }
+              }}
+              workspaceContent={
+                <DoctorConsultationWorkspace
+                  appointmentId={appointmentId}
+                  appointment={appointment}
+                  activeTab={activeWorkspaceTab}
+                  onTabChange={setActiveWorkspaceTab}
+                />
+              }
+            />
+          </motion.div>
         </LiveKitRoom>
       </div>
     );

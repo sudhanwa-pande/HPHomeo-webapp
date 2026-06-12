@@ -3,7 +3,19 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
-import { Calendar, ChevronsUpDown, ClipboardList, Clock, LayoutDashboard, LogOut, Settings, Shield, Users, Wifi, WifiOff } from "lucide-react";
+import {
+  Calendar,
+  ChevronsUpDown,
+  ClipboardList,
+  Clock,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+  Shield,
+  Users,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 
 import { useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
@@ -46,7 +58,11 @@ const NAV_ITEMS = [
   { href: "/doctor/appointments", label: "Appointments", icon: Calendar },
   { href: "/doctor/patients", label: "Patients", icon: Users },
   { href: "/doctor/availability", label: "Availability", icon: Clock },
-  { href: "/doctor/prescriptions", label: "Prescriptions", icon: ClipboardList },
+  {
+    href: "/doctor/prescriptions",
+    label: "Prescriptions",
+    icon: ClipboardList,
+  },
 ];
 
 interface DoctorShellProps {
@@ -56,7 +72,12 @@ interface DoctorShellProps {
   headerRight?: ReactNode;
 }
 
-export function DoctorShell({ children, title, subtitle, headerRight }: DoctorShellProps) {
+export function DoctorShell({
+  children,
+  title,
+  subtitle,
+  headerRight,
+}: DoctorShellProps) {
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
   const headerRef = useRef<HTMLElement>(null);
@@ -66,18 +87,33 @@ export function DoctorShell({ children, title, subtitle, headerRight }: DoctorSh
     const header = headerRef.current;
     const updateHeight = () => {
       const height = header.offsetHeight;
-      document.documentElement.style.setProperty("--doctor-header-height", `${height}px`);
+      document.documentElement.style.setProperty(
+        "--doctor-header-height",
+        `${height}px`,
+      );
     };
     updateHeight();
 
+    let timeoutId: NodeJS.Timeout;
+    const debouncedUpdateHeight = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(updateHeight, 150);
+    };
+
     if (window.ResizeObserver) {
-      const observer = new ResizeObserver(updateHeight);
+      const observer = new ResizeObserver(debouncedUpdateHeight);
       observer.observe(header);
-      return () => observer.disconnect();
+      return () => {
+        clearTimeout(timeoutId);
+        observer.disconnect();
+      };
     }
 
-    window.addEventListener("resize", updateHeight);
-    return () => window.removeEventListener("resize", updateHeight);
+    window.addEventListener("resize", debouncedUpdateHeight);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener("resize", debouncedUpdateHeight);
+    };
   }, []);
 
   // Global SSE stream — pushes real-time events to all doctor pages
@@ -87,7 +123,9 @@ export function DoctorShell({ children, title, subtitle, headerRight }: DoctorSh
       patient_waiting: (event) => {
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointment-detail"],
+        });
         const data = event?.data as Record<string, unknown> | undefined;
         const appointmentId = (data?.appointment_id as string) || "";
         if (!shouldNotifyAppointment(appointmentId)) {
@@ -99,31 +137,42 @@ export function DoctorShell({ children, title, subtitle, headerRight }: DoctorSh
           console.warn("Failed to play patient waiting sound:", e);
         }
         const patientName = (data?.patient_name as string) || "A patient";
-        notifyInfo("Patient waiting", `${patientName} has joined the waiting room.`);
+        notifyInfo(
+          "Patient waiting",
+          `${patientName} has joined the waiting room.`,
+        );
       },
       appointment_booked: () => {
         queryClient.invalidateQueries({ queryKey: ["doctor-notifications"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
       },
       appointment_cancelled: () => {
         queryClient.invalidateQueries({ queryKey: ["doctor-notifications"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] });
       },
       appointment_rescheduled: () => {
         queryClient.invalidateQueries({ queryKey: ["doctor-notifications"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
       },
       payment_confirmed: () => {
         queryClient.invalidateQueries({ queryKey: ["doctor-notifications"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
       },
       // Unified call state change event — replaces old call_status_changed and call_ended
@@ -131,18 +180,26 @@ export function DoctorShell({ children, title, subtitle, headerRight }: DoctorSh
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointment-detail"],
+        });
       },
       appointment_completed: () => {
         queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] });
       },
       appointment_no_show: () => {
         queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
-        queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
+        queryClient.invalidateQueries({
+          queryKey: ["doctor-appointments-range"],
+        });
         queryClient.invalidateQueries({ queryKey: ["doctor-calls-dashboard"] });
         queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] });
       },
@@ -154,8 +211,12 @@ export function DoctorShell({ children, title, subtitle, headerRight }: DoctorSh
       queryClient.invalidateQueries({ queryKey: ["doctor-waiting"] });
       queryClient.invalidateQueries({ queryKey: ["doctor-notifications"] });
       queryClient.invalidateQueries({ queryKey: ["doctor-appointments"] });
-      queryClient.invalidateQueries({ queryKey: ["doctor-appointments-range"] });
-      queryClient.invalidateQueries({ queryKey: ["doctor-appointment-detail"] });
+      queryClient.invalidateQueries({
+        queryKey: ["doctor-appointments-range"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["doctor-appointment-detail"],
+      });
     },
   });
 
@@ -170,13 +231,26 @@ export function DoctorShell({ children, title, subtitle, headerRight }: DoctorSh
     >
       <DoctorSidebar />
       <SidebarInset className="bg-brand-bg">
-        <header ref={headerRef} className="sticky top-0 z-30 flex min-h-[64px] flex-col gap-2 border-b border-border/30 bg-white/88 px-4 py-2.5 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-6">
+        <header
+          ref={headerRef}
+          className="sticky top-0 z-30 flex min-h-[64px] flex-col gap-2 border-b border-border/30 bg-white/88 px-4 py-2.5 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-6"
+        >
           <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
             <SidebarTrigger className="-ml-1 text-brand-subtext hover:text-brand-dark" />
             <div className="h-5 w-px bg-border/40" />
             <div className="min-w-0">
-              <h1 className={isMobile ? "type-ui-section truncate" : "type-ui-title"}>{title}</h1>
-              {subtitle ? <p className="type-caption mt-0.5 text-brand-subtext">{subtitle}</p> : null}
+              <h1
+                className={
+                  isMobile ? "type-ui-section truncate" : "type-ui-title"
+                }
+              >
+                {title}
+              </h1>
+              {subtitle ? (
+                <p className="type-caption mt-0.5 text-brand-subtext">
+                  {subtitle}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:gap-3">
@@ -269,7 +343,9 @@ function DoctorSidebar() {
             <SidebarMenu className="gap-1">
               {NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
-                const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+                const isActive =
+                  pathname === item.href ||
+                  pathname.startsWith(item.href + "/");
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
@@ -281,13 +357,15 @@ function DoctorSidebar() {
                       <div
                         className={cn(
                           "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-bg text-brand-subtext transition-colors group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:w-9",
-                          isActive && "bg-brand text-white"
+                          isActive && "bg-brand text-white",
                         )}
                       >
                         <Icon />
                       </div>
                       <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                        <span className="block truncate text-[12px] font-medium">{item.label}</span>
+                        <span className="block truncate text-[12px] font-medium">
+                          {item.label}
+                        </span>
                       </div>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -314,7 +392,9 @@ function DoctorSidebar() {
                       <Shield />
                     </div>
                     <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                      <span className="block text-[12px] font-medium">Admin Panel</span>
+                      <span className="block text-[12px] font-medium">
+                        Admin Panel
+                      </span>
                     </div>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -327,29 +407,52 @@ function DoctorSidebar() {
       <SidebarFooter className="border-t border-border/20 p-2">
         <DropdownMenu>
           <DropdownMenuTrigger className="flex w-full items-center gap-2.5 rounded-xl border border-transparent p-2 text-left outline-none transition-colors hover:bg-brand-bg/70 data-[state=open]:bg-brand-bg/70 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2.5">
-              <Avatar className="size-8 shrink-0 rounded-lg">
-                {profilePhotoUrl ? <AvatarImage src={profilePhotoUrl} alt={doctor?.full_name || "Doctor"} /> : null}
-                <AvatarFallback className="rounded-lg bg-brand/10 text-xs font-bold text-brand">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                <p className="truncate text-[12px] font-semibold text-brand-dark">{doctor?.full_name || "Doctor"}</p>
-                <p className="truncate text-[10px] text-brand-subtext">{doctor?.registration_no || ""}</p>
-              </div>
-              <ChevronsUpDown className="size-3.5 shrink-0 text-brand-subtext/50 group-data-[collapsible=icon]:hidden" />
+            <Avatar className="size-8 shrink-0 rounded-lg">
+              {profilePhotoUrl ? (
+                <AvatarImage
+                  src={profilePhotoUrl}
+                  alt={doctor?.full_name || "Doctor"}
+                />
+              ) : null}
+              <AvatarFallback className="rounded-lg bg-brand/10 text-xs font-bold text-brand">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+              <p className="truncate text-[12px] font-semibold text-brand-dark">
+                {doctor?.full_name || "Doctor"}
+              </p>
+              <p className="truncate text-[10px] text-brand-subtext">
+                {doctor?.registration_no || ""}
+              </p>
+            </div>
+            <ChevronsUpDown className="size-3.5 shrink-0 text-brand-subtext/50 group-data-[collapsible=icon]:hidden" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="min-w-56 rounded-xl" side="top" align="start" sideOffset={8}>
+          <DropdownMenuContent
+            className="min-w-56 rounded-xl"
+            side="top"
+            align="start"
+            sideOffset={8}
+          >
             <div className="flex items-center gap-3 px-3 py-2.5">
               <Avatar className="size-9 rounded-full">
-                {profilePhotoUrl ? <AvatarImage src={profilePhotoUrl} alt={doctor?.full_name || "Doctor"} /> : null}
+                {profilePhotoUrl ? (
+                  <AvatarImage
+                    src={profilePhotoUrl}
+                    alt={doctor?.full_name || "Doctor"}
+                  />
+                ) : null}
                 <AvatarFallback className="rounded-full bg-brand/10 text-xs font-bold text-brand">
                   {initials}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{doctor?.full_name || "Doctor"}</p>
-                <p className="truncate text-xs text-muted-foreground">{doctor?.registration_no || ""}</p>
+                <p className="truncate text-sm font-semibold">
+                  {doctor?.full_name || "Doctor"}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {doctor?.registration_no || ""}
+                </p>
               </div>
             </div>
             <DropdownMenuSeparator />
@@ -374,7 +477,11 @@ function DoctorSidebar() {
   );
 }
 
-function SSEIndicator({ state }: { state: "connecting" | "connected" | "disconnected" }) {
+function SSEIndicator({
+  state,
+}: {
+  state: "connecting" | "connected" | "disconnected";
+}) {
   if (state === "connected") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
@@ -403,4 +510,3 @@ function SSEIndicator({ state }: { state: "connecting" | "connected" | "disconne
     </span>
   );
 }
-

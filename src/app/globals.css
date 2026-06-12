@@ -781,6 +781,31 @@
     --sileo-state-warning: #d97706;
     --sileo-state-info: #2563eb;
     --sileo-state-action: #4f46e5;
+    
+    --z-video: 10;
+    --z-panel: 20;
+    --z-controls: 30;
+    --z-pip: 100;
+  }
+
+  /* Structural UI Performance Classes */
+  .gpu-accelerated {
+    will-change: transform, opacity;
+    backface-visibility: hidden;
+  }
+
+  .panel-scroll {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .pip-container {
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
   }
 
   [data-sileo-viewport] {

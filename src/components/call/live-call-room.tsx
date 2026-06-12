@@ -71,6 +71,8 @@ import {
   type CameraFacingMode,
 } from "@/lib/media";
 import { cn } from "@/lib/utils";
+import { useCallUIController } from "@/hooks/use-call-ui-controller";
+import { CallLayout } from "@/components/call/call-layout";
 import { Input } from "@/components/ui/input";
 import { useCallStore } from "@/stores/call-store";
 
@@ -101,6 +103,7 @@ type LiveCallRoomProps = {
   className?: string;
   isFullScreenLayout?: boolean;
   onToggleFullScreen?: () => void;
+  isPiP?: boolean;
 };
 
 function getPublishedTrack(track: unknown): TrackReference | undefined {
@@ -146,6 +149,7 @@ export function LiveCallRoom({
   className,
   isFullScreenLayout = true,
   onToggleFullScreen,
+  isPiP = false,
 }: LiveCallRoomProps) {
   const room = useRoomContext();
   const { error, _setError } = useCallStore();
@@ -203,15 +207,29 @@ export function LiveCallRoom({
     localQuality === ConnectionQuality.Poor ||
     localQuality === ConnectionQuality.Lost;
 
-  const [activePanel, setActivePanel] = useState<
-    "chat" | "info" | "notes" | null
-  >(null);
+  const ui = useCallUIController(
+    "consultation",
+    showWorkspaceLayout ? "prescription" : "none",
+  );
   const [switchingCamera, setSwitchingCamera] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [mobileChromeVisible, setMobileChromeVisible] = useState(true);
   const [callDuration, setCallDuration] = useState("00:00");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(!isFullScreenLayout);
+
+  useEffect(() => {
+    setWorkspaceOpen(!isFullScreenLayout);
+  }, [isFullScreenLayout]);
+
+  useEffect(() => {
+    if (isPiP && ui.mode !== "pip") {
+      ui.enterPiP();
+    } else if (!isPiP && ui.mode === "pip") {
+      ui.exitPiP();
+    }
+  }, [isPiP, ui]);
 
   const cameraErrorRef = useRef<Error | undefined>(undefined);
   const micErrorRef = useRef<Error | undefined>(undefined);
@@ -226,6 +244,10 @@ export function LiveCallRoom({
   const [activeSnapPoint, setActiveSnapPoint] = useState<
     string | number | null
   >(0.35);
+
+  const handleClosePanel = useCallback(() => {
+    ui.setPanel("none");
+  }, [ui]);
 
   const commands = useMemo(() => {
     const list: CommandAction[] = [
@@ -453,27 +475,27 @@ export function LiveCallRoom({
     const incomingMessages = nextMessages.filter((m) => !m.from?.isLocal);
     if (incomingMessages.length === 0) return;
     void playIncomingMessageSound();
-    if (activePanel === "chat") return;
+    if (ui.activePanel === "chat") return;
     setUnreadMessages((c) => c + incomingMessages.length);
     const latest = incomingMessages[incomingMessages.length - 1];
     notifyInfo(
       `New message from ${latest.from?.name || remoteLabel}`,
       latest.message,
     );
-  }, [activePanel, chatMessages, remoteLabel]);
+  }, [ui.activePanel, chatMessages, remoteLabel]);
 
   useEffect(() => {
-    if (activePanel === "chat" && unreadMessages > 0) setUnreadMessages(0);
-  }, [activePanel, unreadMessages]);
+    if (ui.activePanel === "chat" && unreadMessages > 0) setUnreadMessages(0);
+  }, [ui.activePanel, unreadMessages]);
 
   const scheduleChromeHide = useCallback(() => {
-    if (!isMobileViewport || activePanel) return;
+    if (!isMobileViewport || ui.activePanel !== "none") return;
     if (chromeHideTimerRef.current) clearTimeout(chromeHideTimerRef.current);
     chromeHideTimerRef.current = setTimeout(
       () => setMobileChromeVisible(false),
       2600,
     );
-  }, [activePanel, isMobileViewport]);
+  }, [ui.activePanel, isMobileViewport]);
 
   const revealMobileChrome = useCallback(() => {
     if (!isMobileViewport) return;
@@ -502,7 +524,7 @@ export function LiveCallRoom({
       }
       return;
     }
-    if (activePanel) {
+    if (ui.activePanel !== "none") {
       setMobileChromeVisible(true);
       if (chromeHideTimerRef.current) {
         clearTimeout(chromeHideTimerRef.current);
@@ -517,7 +539,12 @@ export function LiveCallRoom({
         chromeHideTimerRef.current = null;
       }
     };
-  }, [activePanel, isMobileViewport, mobileChromeVisible, scheduleChromeHide]);
+  }, [
+    ui.activePanel,
+    isMobileViewport,
+    mobileChromeVisible,
+    scheduleChromeHide,
+  ]);
 
   async function toggleCamera() {
     try {
@@ -700,14 +727,18 @@ export function LiveCallRoom({
                   type="button"
                   className={cn(
                     "flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95",
-                    workspaceActiveTab === "notes"
+                    workspaceOpen && workspaceActiveTab === "notes"
                       ? "bg-white/[0.14] text-white"
                       : "bg-white/[0.06] text-white/60 hover:bg-white/[0.10] hover:text-white/80",
                   )}
                   onClick={() => {
-                    onWorkspaceTabChange?.("notes");
-                    if (isMobileViewport) {
-                      setActivePanel("notes");
+                    if (showWorkspaceLayout) {
+                      if (workspaceOpen && workspaceActiveTab === "notes") {
+                        setWorkspaceOpen(false);
+                      } else {
+                        setWorkspaceOpen(true);
+                        onWorkspaceTabChange?.("notes");
+                      }
                     }
                   }}
                   title="Prescription & Notes"
@@ -722,23 +753,14 @@ export function LiveCallRoom({
                 className={cn(
                   "relative flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95",
                   showWorkspaceLayout
-                    ? workspaceActiveTab === "chat"
+                    ? workspaceOpen && workspaceActiveTab === "chat"
                       ? "bg-white/[0.14] text-white"
                       : "bg-white/[0.06] text-white/60 hover:bg-white/[0.10] hover:text-white/80"
-                    : activePanel === "chat"
+                    : ui.activePanel === "chat"
                       ? "bg-white/[0.14] text-white"
                       : "bg-white/[0.06] text-white/60 hover:bg-white/[0.10] hover:text-white/80",
                 )}
-                onClick={() => {
-                  if (showWorkspaceLayout) {
-                    onWorkspaceTabChange?.("chat");
-                    if (isMobileViewport) {
-                      setActivePanel("chat");
-                    }
-                  } else {
-                    setActivePanel((c) => (c === "chat" ? null : "chat"));
-                  }
-                }}
+                onClick={() => ui.togglePanel("chat")}
               >
                 <MessageSquare className="h-4 w-4" />
                 {unreadMessages > 0 ? (
@@ -755,23 +777,14 @@ export function LiveCallRoom({
                   className={cn(
                     "flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95",
                     showWorkspaceLayout
-                      ? workspaceActiveTab === "info"
+                      ? workspaceOpen && workspaceActiveTab === "info"
                         ? "bg-white/[0.14] text-white"
                         : "bg-white/[0.06] text-white/60 hover:bg-white/[0.10] hover:text-white/80"
-                      : activePanel === "info"
+                      : ui.activePanel === "info"
                         ? "bg-white/[0.14] text-white"
                         : "bg-white/[0.06] text-white/60 hover:bg-white/[0.10] hover:text-white/80",
                   )}
-                  onClick={() => {
-                    if (showWorkspaceLayout) {
-                      onWorkspaceTabChange?.("info");
-                      if (isMobileViewport) {
-                        setActivePanel("info");
-                      }
-                    } else {
-                      setActivePanel((c) => (c === "info" ? null : "info"));
-                    }
-                  }}
+                  onClick={() => ui.togglePanel("info")}
                 >
                   <Info className="h-4 w-4" />
                 </button>
@@ -782,7 +795,10 @@ export function LiveCallRoom({
                 <button
                   type="button"
                   className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[0.06] text-white/60 transition active:scale-95 hover:bg-white/[0.10] hover:text-white/80"
-                  onClick={onToggleFullScreen}
+                  onClick={() => {
+                    if (onToggleFullScreen) onToggleFullScreen();
+                    ui.toggleFullscreen();
+                  }}
                   title={isFullScreenLayout ? "Minimize" : "Full screen"}
                 >
                   {isFullScreenLayout ? (
@@ -811,160 +827,158 @@ export function LiveCallRoom({
           )}
         </header>
 
-        {/* ── Main Workspace Layout ─────────────────────────── */}
-        <div className="flex flex-1 min-h-0 relative overflow-hidden">
-          {/* Video area */}
-          <div
-            className="relative flex-1 h-full overflow-hidden"
-            ref={containerRef}
-          >
-            {/* Remote video / waiting state */}
-            <div className="absolute inset-0">
-              {remoteScreenTrack && remoteParticipants.length > 0 ? (
-                <ParticipantTile
-                  trackRef={remoteScreenTrack}
-                  className="h-full w-full bg-black [&>video]:object-contain"
-                  disableSpeakingIndicator
-                />
-              ) : localScreenShareTrack ? (
-                <ParticipantTile
-                  trackRef={localScreenShareTrack}
-                  className="h-full w-full bg-black [&>video]:object-contain"
-                  disableSpeakingIndicator
-                />
-              ) : remoteParticipants.length > 0 ? (
-                <motion.div
-                  initial={{ scale: 0.97, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                  className={cn(
-                    "h-full w-full transition-all duration-300 relative",
-                    remoteParticipants[0]?.isSpeaking
-                      ? "ring-4 ring-brand/50 ring-inset shadow-[0_0_30px_rgba(88,155,255,0.35)]"
-                      : "",
-                  )}
-                >
-                  <ParticipantTile
-                    trackRef={
-                      remoteVideoTrack || {
-                        participant: remoteParticipants[0],
-                        source: Track.Source.Camera,
-                      }
-                    }
-                    className="h-full w-full bg-app-bg [&>video]:object-contain"
-                    disableSpeakingIndicator
-                  />
-                </motion.div>
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(ellipse_at_center,var(--call-surface)_0%,var(--call-bg)_70%)]">
-                  <div className="max-w-sm px-6 text-center">
-                    <div className="relative mx-auto h-28 w-28 sm:h-36 sm:w-36">
-                      <span
-                        className="absolute inset-0 rounded-full border border-white/[0.04]"
-                        style={{
-                          animation:
-                            "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite",
-                        }}
-                      />
-                      <span
-                        className="absolute inset-3 rounded-full border border-white/[0.06]"
-                        style={{
-                          animation:
-                            "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite 1.3s",
-                        }}
-                      />
-                      <span
-                        className="absolute inset-6 rounded-full border border-white/[0.08]"
-                        style={{
-                          animation:
-                            "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite 2.6s",
-                        }}
-                      />
-                      <div className="absolute inset-8 flex items-center justify-center rounded-full bg-white/[0.06] backdrop-blur-sm">
-                        <User className="h-8 w-8 text-white/30 sm:h-10 sm:w-10" />
-                      </div>
-                    </div>
-                    <p className="mt-6 text-base font-semibold tracking-tight text-white/85 sm:mt-8 sm:text-xl">
-                      {hasRemote ? remoteLabel : remoteWaitingTitle}
-                    </p>
-                    <p className="mt-2 text-sm leading-relaxed text-white/40">
-                      {hasRemote
-                        ? `${remoteLabel} is connected.`
-                        : remoteDroppedDescription}
-                    </p>
-                    <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-3 py-1.5 text-[11px] font-medium text-white/40">
-                      <span
-                        className={cn(
-                          "h-1.5 w-1.5 rounded-full",
-                          isConnected ? "bg-state-live" : "bg-white/30",
-                        )}
-                      />
-                      {connectionLabel}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* ── Remote connection quality badge ──────────────── */}
-            {hasWeakRemoteSignal && (
-              <div className="pointer-events-none absolute left-3 top-3 z-10 sm:left-4 sm:top-4">
-                <div className="flex items-center gap-1.5 rounded-lg bg-amber-500/90 px-2.5 py-1.5 text-[11px] font-semibold text-white shadow-lg backdrop-blur-md">
-                  <WifiOff className="h-3 w-3" />
-                  Weak connection
-                </div>
-              </div>
-            )}
-
-            {/* Remote participant label (top-left, only when waiting) */}
-            {hasRemote &&
-            !remoteVideoTrack &&
-            !remoteScreenTrack &&
-            !localScreenShareTrack &&
-            !hasWeakRemoteSignal ? (
+        {/* ── Main Workspace Layout via CallLayout ─────────────────────────── */}
+        <CallLayout
+          mode={ui.mode}
+          panel={ui.activePanel}
+          isMobileViewport={isMobileViewport}
+          controls={
+            <>
+              {/* ── Control bar ────────────────────────────────── */}
               <div
                 className={cn(
-                  "pointer-events-none absolute left-3 top-3 z-10 transition-all duration-300 sm:left-4 sm:top-4",
+                  "pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-3 transition-all duration-300 sm:px-6",
                   isMobileViewport
                     ? mobileChromeVisible
                       ? "translate-y-0 opacity-100"
-                      : "-translate-y-4 opacity-0"
+                      : "translate-y-full opacity-0"
                     : "translate-y-0 opacity-100",
                 )}
-              >
-                <div className="inline-flex items-center gap-1.5 rounded-lg bg-black/50 px-2.5 py-1.5 text-[11px] font-medium text-white/80 backdrop-blur-md">
-                  <User className="h-3 w-3" />
-                  {remoteLabel}
-                </div>
-              </div>
-            ) : null}
-
-            {/* ── Remote PiP preview (when screen sharing) ───────────── */}
-            {(remoteScreenTrack || localScreenShareTrack) &&
-            remoteParticipants.length > 0 ? (
-              <motion.div
-                drag
-                dragConstraints={containerRef}
-                dragElastic={0.05}
-                dragMomentum={false}
-                className={cn(
-                  "absolute z-10 cursor-grab active:cursor-grabbing touch-none",
-                  isMobileViewport
-                    ? "w-[28vw] min-w-[88px] max-w-[130px]"
-                    : "w-[160px]",
-                )}
                 style={{
-                  bottom: isMobileViewport
-                    ? "calc(6.5rem + 30vw + env(safe-area-inset-bottom, 0px))"
-                    : "18.5rem",
-                  right: isMobileViewport ? "12px" : "20px",
+                  paddingBottom:
+                    "calc(1rem + env(safe-area-inset-bottom, 0px))",
                 }}
               >
-                <div className="pointer-events-none overflow-hidden rounded-xl border border-call-border bg-panel shadow-[0_8px_32px_rgba(0,0,0,0.5)] sm:rounded-2xl">
-                  <div
+                <div className="pointer-events-auto flex items-center gap-2.5 rounded-2xl border border-call-border bg-panel/90 px-3 py-3 shadow-medium backdrop-blur-xl sm:gap-4 sm:px-5 transition-all duration-300 md:opacity-70 md:hover:opacity-100 md:focus-within:opacity-100 md:hover:shadow-[0_8px_32px_rgba(88,155,255,0.15)]">
+                  {/* Mic */}
+                  <ControlButton
+                    active={isMicrophoneEnabled}
+                    icon={isMicrophoneEnabled ? Mic : MicOff}
+                    label={isMicrophoneEnabled ? "Mute" : "Unmute"}
+                    onClick={toggleMic}
+                  />
+                  {/* Camera */}
+                  <ControlButton
+                    active={isCameraLive}
+                    icon={isCameraLive ? Camera : CameraOff}
+                    label={isCameraLive ? "Video" : "Video off"}
+                    onClick={toggleCamera}
+                  />
+                  {/* Camera flip */}
+                  {canSwitchCamera && preferredFacingMode ? (
+                    <ControlButton
+                      active
+                      icon={RefreshCw}
+                      label="Flip"
+                      onClick={() => void switchCamera()}
+                      neutral
+                      disabled={switchingCamera}
+                      spinning={switchingCamera}
+                    />
+                  ) : null}
+                  {/* Screen share */}
+                  {allowScreenShare ? (
+                    <ControlButton
+                      active={!isScreenShareEnabled}
+                      icon={isScreenShareEnabled ? MonitorOff : Monitor}
+                      label={isScreenShareEnabled ? "Stop" : "Share"}
+                      onClick={toggleScreenShare}
+                      neutral
+                    />
+                  ) : null}
+
+                  {/* Fullscreen */}
+                  <div className="hidden sm:block">
+                    <ControlButton
+                      active={false}
+                      icon={isFullscreen ? Minimize : Maximize}
+                      label="Fullscreen"
+                      onClick={toggleFullscreen}
+                      neutral
+                    />
+                  </div>
+
+                  <div className="mx-0.5 hidden h-8 w-px bg-white/[0.08] sm:block" />
+
+                  {/* Leave */}
+                  <Dialog>
+                    <DialogTrigger
+                      render={
+                        <button
+                          type="button"
+                          className="flex h-11 items-center gap-2 rounded-full bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400 active:scale-[0.97] active:bg-red-600 disabled:opacity-60 sm:px-5"
+                          disabled={endLoading}
+                        />
+                      }
+                    >
+                      <PhoneOff className="h-4 w-4" />
+                      <span className="hidden sm:inline">{endLabel}</span>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md border-call-border bg-panel text-white">
+                      <DialogHeader>
+                        <DialogTitle className="text-xl">
+                          Are you sure?
+                        </DialogTitle>
+                        <DialogDescription className="text-white/60">
+                          This will disconnect both you and the patient from the
+                          call. You can view the consultation details later from
+                          your dashboard.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end border-none bg-transparent pt-0 px-0 pb-0">
+                        <DialogClose
+                          render={
+                            <Button
+                              variant="outline"
+                              className="rounded-xl border-white/10 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                            />
+                          }
+                        >
+                          Cancel
+                        </DialogClose>
+                        <DialogClose
+                          render={
+                            <Button
+                              onClick={onLeave}
+                              className="rounded-xl bg-red-500 text-white hover:bg-red-600"
+                            />
+                          }
+                        >
+                          Yes, end call
+                        </DialogClose>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </div>
+            </>
+          }
+          video={
+            <div className="absolute inset-0">
+              {/* Remote video / waiting state */}
+              <div className="absolute inset-0">
+                {remoteScreenTrack && remoteParticipants.length > 0 ? (
+                  <ParticipantTile
+                    trackRef={remoteScreenTrack}
+                    className="h-full w-full bg-black [&>video]:object-contain"
+                    disableSpeakingIndicator
+                  />
+                ) : localScreenShareTrack ? (
+                  <ParticipantTile
+                    trackRef={localScreenShareTrack}
+                    className="h-full w-full bg-black [&>video]:object-contain"
+                    disableSpeakingIndicator
+                  />
+                ) : remoteParticipants.length > 0 ? (
+                  <motion.div
+                    initial={{ scale: 0.97, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                     className={cn(
-                      "relative",
-                      isMobileViewport ? "aspect-[3/4]" : "aspect-[4/3]",
+                      "h-full w-full transition-all duration-300 relative",
+                      remoteParticipants[0]?.isSpeaking
+                        ? "ring-4 ring-brand/50 ring-inset shadow-[0_0_30px_rgba(88,155,255,0.35)]"
+                        : "",
                     )}
                   >
                     <ParticipantTile
@@ -974,267 +988,245 @@ export function LiveCallRoom({
                           source: Track.Source.Camera,
                         }
                       }
-                      className="h-full w-full [&>video]:object-cover"
+                      className="h-full w-full bg-app-bg [&>video]:object-contain"
+                      disableSpeakingIndicator
+                    />
+                  </motion.div>
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(ellipse_at_center,var(--call-surface)_0%,var(--call-bg)_70%)]">
+                    <div className="max-w-sm px-6 text-center">
+                      <div className="relative mx-auto h-28 w-28 sm:h-36 sm:w-36">
+                        <span
+                          className="absolute inset-0 rounded-full border border-white/[0.04]"
+                          style={{
+                            animation:
+                              "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite",
+                          }}
+                        />
+                        <span
+                          className="absolute inset-3 rounded-full border border-white/[0.06]"
+                          style={{
+                            animation:
+                              "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite 1.3s",
+                          }}
+                        />
+                        <span
+                          className="absolute inset-6 rounded-full border border-white/[0.08]"
+                          style={{
+                            animation:
+                              "ping 4s cubic-bezier(0, 0, 0.2, 1) infinite 2.6s",
+                          }}
+                        />
+                        <div className="absolute inset-8 flex items-center justify-center rounded-full bg-white/[0.06] backdrop-blur-sm">
+                          <User className="h-8 w-8 text-white/30 sm:h-10 sm:w-10" />
+                        </div>
+                      </div>
+                      <p className="mt-6 text-base font-semibold tracking-tight text-white/85 sm:mt-8 sm:text-xl">
+                        {hasRemote ? remoteLabel : remoteWaitingTitle}
+                      </p>
+                      <p className="mt-2 text-sm leading-relaxed text-white/40">
+                        {hasRemote
+                          ? `${remoteLabel} is connected.`
+                          : remoteDroppedDescription}
+                      </p>
+                      <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-3 py-1.5 text-[11px] font-medium text-white/40">
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            isConnected ? "bg-state-live" : "bg-white/30",
+                          )}
+                        />
+                        {connectionLabel}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Remote connection quality badge ──────────────── */}
+              {hasWeakRemoteSignal && (
+                <div className="pointer-events-none absolute left-3 top-3 z-10 sm:left-4 sm:top-4">
+                  <div className="flex items-center gap-1.5 rounded-lg bg-amber-500/90 px-2.5 py-1.5 text-[11px] font-semibold text-white shadow-lg backdrop-blur-md">
+                    <WifiOff className="h-3 w-3" />
+                    Weak connection
+                  </div>
+                </div>
+              )}
+
+              {/* Remote participant label (top-left, only when waiting) */}
+              {hasRemote &&
+              !remoteVideoTrack &&
+              !remoteScreenTrack &&
+              !localScreenShareTrack &&
+              !hasWeakRemoteSignal ? (
+                <div
+                  className={cn(
+                    "pointer-events-none absolute left-3 top-3 z-10 transition-all duration-300 sm:left-4 sm:top-4",
+                    isMobileViewport
+                      ? mobileChromeVisible
+                        ? "translate-y-0 opacity-100"
+                        : "-translate-y-4 opacity-0"
+                      : "translate-y-0 opacity-100",
+                  )}
+                >
+                  <div className="inline-flex items-center gap-1.5 rounded-lg bg-black/50 px-2.5 py-1.5 text-[11px] font-medium text-white/80 backdrop-blur-md">
+                    <User className="h-3 w-3" />
+                    {remoteLabel}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* ── Remote PiP preview (when screen sharing) ───────────── */}
+              {(remoteScreenTrack || localScreenShareTrack) &&
+              remoteParticipants.length > 0 ? (
+                <motion.div
+                  drag
+                  dragConstraints={containerRef}
+                  dragElastic={0.05}
+                  dragMomentum={false}
+                  className={cn(
+                    "absolute z-10 cursor-grab active:cursor-grabbing touch-none",
+                    isMobileViewport
+                      ? "w-[28vw] min-w-[88px] max-w-[130px]"
+                      : "w-[160px]",
+                  )}
+                  style={{
+                    bottom: isMobileViewport
+                      ? "calc(6.5rem + 30vw + env(safe-area-inset-bottom, 0px))"
+                      : "18.5rem",
+                    right: isMobileViewport ? "12px" : "20px",
+                  }}
+                >
+                  <div className="pointer-events-none overflow-hidden rounded-xl border border-call-border bg-panel shadow-[0_8px_32px_rgba(0,0,0,0.5)] sm:rounded-2xl">
+                    <div
+                      className={cn(
+                        "relative",
+                        isMobileViewport ? "aspect-[3/4]" : "aspect-[4/3]",
+                      )}
+                    >
+                      <ParticipantTile
+                        trackRef={
+                          remoteVideoTrack || {
+                            participant: remoteParticipants[0],
+                            source: Track.Source.Camera,
+                          }
+                        }
+                        className="h-full w-full [&>video]:object-cover"
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              ) : null}
+
+              {/* ── Reconnecting overlay ────────────────────────── */}
+              {isReconnecting && (
+                <div className="absolute top-4 right-4 z-30 flex items-center gap-2 rounded-full bg-amber-500/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-md">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Reconnecting...
+                </div>
+              )}
+
+              {/* ── Local PiP preview (bottom-right) ───────────── */}
+              <motion.div
+                drag
+                dragConstraints={containerRef}
+                dragElastic={0.05}
+                dragMomentum={false}
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                className={cn(
+                  "absolute z-10 cursor-grab active:cursor-grabbing touch-none",
+                  isMobileViewport
+                    ? "w-[28vw] min-w-[88px] max-w-[130px]"
+                    : "w-[160px]",
+                )}
+                style={{
+                  bottom: isMobileViewport
+                    ? "calc(6.5rem + env(safe-area-inset-bottom, 0px))"
+                    : "6.5rem",
+                  right: isMobileViewport ? "12px" : "20px",
+                }}
+              >
+                <div className="pointer-events-none overflow-hidden rounded-xl border border-white/10 bg-panel shadow-medium sm:rounded-2xl ring-1 ring-white/10">
+                  <div
+                    className={cn(
+                      "relative",
+                      isMobileViewport ? "aspect-[3/4]" : "aspect-[4/3]",
+                    )}
+                  >
+                    <ParticipantTile
+                      trackRef={
+                        localVideoTrack || {
+                          participant: localParticipant,
+                          source: Track.Source.Camera,
+                        }
+                      }
+                      className="h-full w-full [&>video]:object-cover [&>video]:scale-x-[-1]"
                     />
                   </div>
                 </div>
               </motion.div>
-            ) : null}
-
-            {/* ── Reconnecting overlay ────────────────────────── */}
-            {isReconnecting && (
-              <div className="absolute top-4 right-4 z-30 flex items-center gap-2 rounded-full bg-amber-500/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-md">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Reconnecting...
-              </div>
-            )}
-
-            {/* ── Local PiP preview (bottom-right) ───────────── */}
-            <motion.div
-              drag
-              dragConstraints={containerRef}
-              dragElastic={0.05}
-              dragMomentum={false}
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.35, ease: "easeOut" }}
-              className={cn(
-                "absolute z-10 cursor-grab active:cursor-grabbing touch-none",
-                isMobileViewport
-                  ? "w-[28vw] min-w-[88px] max-w-[130px]"
-                  : "w-[160px]",
-              )}
-              style={{
-                bottom: isMobileViewport
-                  ? "calc(6.5rem + env(safe-area-inset-bottom, 0px))"
-                  : "6.5rem",
-                right: isMobileViewport ? "12px" : "20px",
-              }}
-            >
-              <div className="pointer-events-none overflow-hidden rounded-xl border border-white/10 bg-panel shadow-medium sm:rounded-2xl ring-1 ring-white/10">
-                <div
-                  className={cn(
-                    "relative",
-                    isMobileViewport ? "aspect-[3/4]" : "aspect-[4/3]",
-                  )}
-                >
-                  <ParticipantTile
-                    trackRef={
-                      localVideoTrack || {
-                        participant: localParticipant,
-                        source: Track.Source.Camera,
-                      }
-                    }
-                    className="h-full w-full [&>video]:object-cover [&>video]:scale-x-[-1]"
-                  />
-                </div>
-              </div>
-            </motion.div>
-
-            {/* ── Control bar ────────────────────────────────── */}
-            <div
-              className={cn(
-                "pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-3 transition-all duration-300 sm:px-6",
-                isMobileViewport
-                  ? mobileChromeVisible
-                    ? "translate-y-0 opacity-100"
-                    : "translate-y-full opacity-0"
-                  : "translate-y-0 opacity-100",
-              )}
-              style={{
-                paddingBottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
-              }}
-            >
-              <div className="pointer-events-auto flex items-center gap-2.5 rounded-2xl border border-call-border bg-panel/90 px-3 py-3 shadow-medium backdrop-blur-xl sm:gap-4 sm:px-5 transition-all duration-300 md:opacity-70 md:hover:opacity-100 md:focus-within:opacity-100 md:hover:shadow-[0_8px_32px_rgba(88,155,255,0.15)]">
-                {/* Mic */}
-                <ControlButton
-                  active={isMicrophoneEnabled}
-                  icon={isMicrophoneEnabled ? Mic : MicOff}
-                  label={isMicrophoneEnabled ? "Mute" : "Unmute"}
-                  onClick={toggleMic}
-                />
-                {/* Camera */}
-                <ControlButton
-                  active={isCameraLive}
-                  icon={isCameraLive ? Camera : CameraOff}
-                  label={isCameraLive ? "Video" : "Video off"}
-                  onClick={toggleCamera}
-                />
-                {/* Camera flip */}
-                {canSwitchCamera && preferredFacingMode ? (
-                  <ControlButton
-                    active
-                    icon={RefreshCw}
-                    label="Flip"
-                    onClick={() => void switchCamera()}
-                    neutral
-                    disabled={switchingCamera}
-                    spinning={switchingCamera}
-                  />
-                ) : null}
-                {/* Screen share */}
-                {allowScreenShare ? (
-                  <ControlButton
-                    active={!isScreenShareEnabled}
-                    icon={isScreenShareEnabled ? MonitorOff : Monitor}
-                    label={isScreenShareEnabled ? "Stop" : "Share"}
-                    onClick={toggleScreenShare}
-                    neutral
-                  />
-                ) : null}
-
-                {/* Fullscreen */}
-                <div className="hidden sm:block">
-                  <ControlButton
-                    active={false}
-                    icon={isFullscreen ? Minimize : Maximize}
-                    label="Fullscreen"
-                    onClick={toggleFullscreen}
-                    neutral
-                  />
-                </div>
-
-                <div className="mx-0.5 hidden h-8 w-px bg-white/[0.08] sm:block" />
-
-                {/* Leave */}
-                <Dialog>
-                  <DialogTrigger
-                    render={
-                      <button
-                        type="button"
-                        className="flex h-11 items-center gap-2 rounded-full bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400 active:scale-[0.97] active:bg-red-600 disabled:opacity-60 sm:px-5"
-                        disabled={endLoading}
-                      />
-                    }
-                  >
-                    <PhoneOff className="h-4 w-4" />
-                    <span className="hidden sm:inline">{endLabel}</span>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-md border-call-border bg-panel text-white">
-                    <DialogHeader>
-                      <DialogTitle className="text-xl">
-                        Are you sure?
-                      </DialogTitle>
-                      <DialogDescription className="text-white/60">
-                        This will disconnect both you and the patient from the
-                        call. You can view the consultation details later from
-                        your dashboard.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end border-none bg-transparent pt-0 px-0 pb-0">
-                      <DialogClose
-                        render={
-                          <Button
-                            variant="outline"
-                            className="rounded-xl border-white/10 bg-white/5 text-white hover:bg-white/10 hover:text-white"
-                          />
-                        }
-                      >
-                        Cancel
-                      </DialogClose>
-                      <DialogClose
-                        render={
-                          <Button
-                            onClick={onLeave}
-                            className="rounded-xl bg-red-500 text-white hover:bg-red-600"
-                          />
-                        }
-                      >
-                        Yes, end call
-                      </DialogClose>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
             </div>
-          </div>
+          }
+          panels={
+            <>
+              {/* Desktop workspace content if panel is prescription or info */}
+              <div
+                className={cn(
+                  "absolute inset-0 transition-opacity duration-300 panel-base",
+                  (ui.activePanel === "prescription" ||
+                    ui.activePanel === "patient") &&
+                    "gpu-accelerated",
+                  ui.activePanel === "prescription" ||
+                    ui.activePanel === "patient"
+                    ? "opacity-100 pointer-events-auto [z-index:var(--z-panel)]"
+                    : "opacity-0 pointer-events-none z-0",
+                )}
+              >
+                {workspaceContent}
+              </div>
 
-          {/* Desktop workspace panel */}
-          {!isMobileViewport && showWorkspaceLayout && workspaceContent && (
-            <div className="w-[420px] md:w-[480px] lg:w-[520px] shrink-0 h-full border-l border-call-border bg-panel z-20">
-              {workspaceContent}
-            </div>
-          )}
-        </div>
-
-        {/* ── Mobile Workspace / Side Panel Drawer (Vaul) ────────── */}
-        {isMobileViewport &&
-        ((showWorkspaceLayout && workspaceContent) || activePanel) ? (
-          <Drawer.Root
-            open={true}
-            dismissible={!showWorkspaceLayout}
-            snapPoints={[0.35, 0.85]}
-            activeSnapPoint={activeSnapPoint}
-            setActiveSnapPoint={setActiveSnapPoint}
-          >
-            <Drawer.Portal>
-              <Drawer.Overlay
-                className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[1px]"
-                onClick={() => {
-                  if (!showWorkspaceLayout) setActivePanel(null);
-                }}
-              />
-              <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-[20px] bg-panel border-t border-call-border shadow-[0_-8px_40px_rgba(0,0,0,0.5)] focus:outline-none max-h-[85vh]">
-                <div className="mx-auto my-3 h-1.5 w-12 shrink-0 rounded-full bg-white/20" />
-                <div className="flex-1 overflow-y-auto px-4 pb-6">
-                  {showWorkspaceLayout && workspaceContent ? (
-                    workspaceContent
-                  ) : activePanel === "chat" ? (
-                    <ChatPanel
-                      chatMessages={chatMessages}
-                      isSending={isSending}
-                      onClose={() => setActivePanel(null)}
-                      remoteLabel={remoteLabel}
-                      onSend={send}
-                    />
-                  ) : (
-                    <InfoPanel
-                      label={infoLabel}
-                      onClose={() => setActivePanel(null)}
-                      content={infoContent}
-                    />
-                  )}
-                </div>
-              </Drawer.Content>
-            </Drawer.Portal>
-          </Drawer.Root>
-        ) : null}
-
-        {/* ── Desktop Side Panel (chat / info) ────────────────── */}
-        {!isMobileViewport && activePanel ? (
-          <>
-            <button
-              type="button"
-              aria-label="Close side panel"
-              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] md:bg-black/30"
-              onClick={() => setActivePanel(null)}
-            />
-            <aside
-              className="fixed inset-y-0 right-0 z-50 w-full max-w-[100vw] border-l border-call-border bg-panel/98 shadow-[-8px_0_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl sm:w-[360px] sm:max-w-[380px]"
-              style={{
-                paddingBottom: "env(safe-area-inset-bottom, 0px)",
-                paddingTop: "env(safe-area-inset-top, 0px)",
-              }}
-            >
-              {activePanel === "chat" ? (
+              {/* Chat Panel */}
+              <div
+                className={cn(
+                  "absolute inset-0 bg-panel transition-opacity duration-300 panel-base",
+                  ["chat", "info"].includes(ui.activePanel) &&
+                    "gpu-accelerated",
+                  ui.activePanel === "chat"
+                    ? "opacity-100 pointer-events-auto [z-index:var(--z-panel)]"
+                    : "opacity-0 pointer-events-none z-0",
+                )}
+              >
                 <ChatPanel
                   chatMessages={chatMessages}
                   isSending={isSending}
-                  onClose={() => setActivePanel(null)}
+                  onClose={handleClosePanel}
                   remoteLabel={remoteLabel}
                   onSend={send}
                 />
-              ) : (
+              </div>
+
+              {/* Info Panel */}
+              <div
+                className={cn(
+                  "absolute inset-0 bg-panel transition-opacity duration-300 panel-base",
+                  ["chat", "info"].includes(ui.activePanel) &&
+                    "gpu-accelerated",
+                  ui.activePanel === "info"
+                    ? "opacity-100 pointer-events-auto [z-index:var(--z-panel)]"
+                    : "opacity-0 pointer-events-none z-0",
+                )}
+              >
                 <InfoPanel
                   label={infoLabel}
-                  onClose={() => setActivePanel(null)}
+                  onClose={handleClosePanel}
                   content={infoContent}
                 />
-              )}
-            </aside>
-          </>
-        ) : null}
-
+              </div>
+            </>
+          }
+        />
         <RoomAudioRenderer />
         <CommandMenu
           open={cmdOpen}
@@ -1303,7 +1295,7 @@ function ControlButton({
 
 /* ───────────────── Chat Panel ───────────────── */
 
-function ChatPanel({
+const ChatPanel = React.memo(function ChatPanel({
   chatMessages,
   isSending,
   onSend,
@@ -1318,6 +1310,13 @@ function ChatPanel({
 }) {
   const [message, setMessage] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -1333,7 +1332,7 @@ function ChatPanel({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col min-h-0">
       <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
         <div>
           <p className="text-sm font-semibold text-white">Chat</p>
@@ -1352,7 +1351,7 @@ function ChatPanel({
 
       <div
         ref={scrollRef}
-        className="flex-1 space-y-2.5 overflow-y-auto px-4 py-4"
+        className="flex-1 space-y-2.5 overflow-y-auto px-4 py-4 min-h-0 flex flex-col"
       >
         {chatMessages.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-white/[0.08] px-4 py-8 text-center text-[13px] leading-relaxed text-white/30">
@@ -1404,6 +1403,7 @@ function ChatPanel({
       <div className="border-t border-white/[0.06] px-4 py-3">
         <div className="flex gap-2">
           <Input
+            ref={inputRef}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => {
@@ -1427,11 +1427,11 @@ function ChatPanel({
       </div>
     </div>
   );
-}
+});
 
 /* ───────────────── Info Panel ───────────────── */
 
-function InfoPanel({
+const InfoPanel = React.memo(function InfoPanel({
   label,
   content,
   onClose,
@@ -1441,7 +1441,7 @@ function InfoPanel({
   onClose: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col min-h-0">
       <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
         <div>
           <p className="text-sm font-semibold text-white">{label}</p>
@@ -1457,7 +1457,9 @@ function InfoPanel({
           <X className="h-4 w-4" />
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto px-5 py-4">{content}</div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0 flex flex-col">
+        {content}
+      </div>
     </div>
   );
-}
+});
