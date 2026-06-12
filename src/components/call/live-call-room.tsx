@@ -969,7 +969,7 @@ export function LiveCallRoom({
                     className="h-full w-full bg-black [&>video]:object-contain"
                     disableSpeakingIndicator
                   />
-                ) : remoteParticipants.length > 0 ? (
+                ) : remoteVideoTrack ? (
                   <motion.div
                     initial={{ scale: 0.97, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
@@ -982,12 +982,7 @@ export function LiveCallRoom({
                     )}
                   >
                     <ParticipantTile
-                      trackRef={
-                        remoteVideoTrack || {
-                          participant: remoteParticipants[0],
-                          source: Track.Source.Camera,
-                        }
-                      }
+                      trackRef={remoteVideoTrack}
                       className="h-full w-full bg-app-bg [&>video]:object-contain"
                       disableSpeakingIndicator
                     />
@@ -1018,7 +1013,24 @@ export function LiveCallRoom({
                           }}
                         />
                         <div className="absolute inset-8 flex items-center justify-center rounded-full bg-white/[0.06] backdrop-blur-sm">
-                          <User className="h-8 w-8 text-white/30 sm:h-10 sm:w-10" />
+                          {hasRemote && remoteParticipants[0]?.isSpeaking ? (
+                            <div className="flex items-center gap-1">
+                              <span
+                                className="h-3 w-1 animate-pulse rounded-full bg-brand/80"
+                                style={{ animationDelay: "0ms" }}
+                              />
+                              <span
+                                className="h-5 w-1 animate-pulse rounded-full bg-brand/80"
+                                style={{ animationDelay: "150ms" }}
+                              />
+                              <span
+                                className="h-3 w-1 animate-pulse rounded-full bg-brand/80"
+                                style={{ animationDelay: "300ms" }}
+                              />
+                            </div>
+                          ) : (
+                            <User className="h-8 w-8 text-white/30 sm:h-10 sm:w-10" />
+                          )}
                         </div>
                       </div>
                       <p className="mt-6 text-base font-semibold tracking-tight text-white/85 sm:mt-8 sm:text-xl">
@@ -1026,7 +1038,7 @@ export function LiveCallRoom({
                       </p>
                       <p className="mt-2 text-sm leading-relaxed text-white/40">
                         {hasRemote
-                          ? `${remoteLabel} is connected.`
+                          ? `${remoteLabel} is connected (Audio Only).`
                           : remoteDroppedDescription}
                       </p>
                       <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-3 py-1.5 text-[11px] font-medium text-white/40">
@@ -1155,15 +1167,16 @@ export function LiveCallRoom({
                       isMobileViewport ? "aspect-[3/4]" : "aspect-[4/3]",
                     )}
                   >
-                    <ParticipantTile
-                      trackRef={
-                        localVideoTrack || {
-                          participant: localParticipant,
-                          source: Track.Source.Camera,
-                        }
-                      }
-                      className="h-full w-full [&>video]:object-cover [&>video]:scale-x-[-1]"
-                    />
+                    {localVideoTrack ? (
+                      <ParticipantTile
+                        trackRef={localVideoTrack}
+                        className="h-full w-full [&>video]:object-cover [&>video]:scale-x-[-1]"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-black/60 backdrop-blur-md">
+                        <CameraOff className="h-6 w-6 text-white/40" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </motion.div>

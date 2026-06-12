@@ -55,6 +55,8 @@ import { CompleteSection } from "@/components/doctor/appointment-detail/Complete
 import { ReceiptSection } from "@/components/doctor/appointment-detail/ReceiptSection";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 
+import { useQueryState, parseAsStringLiteral } from "nuqs";
+
 type StepKey =
   | "overview"
   | "consultation"
@@ -131,7 +133,18 @@ function DetailContent({
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const initialStep = (searchParams.get("step") as StepKey) || "overview";
-  const [activeStep, setActiveStep] = useState<StepKey>(initialStep);
+  const [activeStep, setActiveStep] = useQueryState(
+    "step",
+    parseAsStringLiteral([
+      "overview",
+      "consultation",
+      "prescription",
+      "complete",
+      "receipt",
+    ] as const)
+      .withDefault(initialStep)
+      .withOptions({ history: "push" }),
+  );
   const [completionCelebration, setCompletionCelebration] = useState(false);
 
   const { isFinalized, hasDraft, hasUnsavedChanges, autoSaveStatus, isTyping } =
@@ -434,7 +447,10 @@ function DetailContent({
               {apt.call_status === "waiting" && apt.mode === "online" && (
                 <Button
                   className="w-full rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
-                  onClick={() => router.push(`/doctor/call/${appointmentId}`)}
+                  onClick={() => {
+                    hapticTap();
+                    setActiveStep("consultation");
+                  }}
                 >
                   <Phone className="h-4 w-4" />
                   Join Call
