@@ -39,16 +39,3 @@ This is the Next.js frontend application for the hpHomeo telemedicine platform. 
 *   **Video Flow:** Patient and doctor routes trigger the mounting of LiveKit React components, which connect directly to the LiveKit server for WebRTC media routing.
 
 ---
-
-## Getting Started
-
-```bash
-git clone https://github.com/sudhanwa-pande/HPHomeo-webapp.git
-cd HPHomeo-webapp
-
-npm install
-
-cp .env.example .env.local
-
-npm run dev
-```
